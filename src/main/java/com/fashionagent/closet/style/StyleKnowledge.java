@@ -95,10 +95,10 @@ public class StyleKnowledge implements ApplicationRunner {
 
     /**
      * 상황과 가까운 조각 topK개(자리가 정해졌으면 그 자리 문서와 모든 자리에 해당하는(any) 문서에서만) +
-     * 체감 온도가 있으면 그 온도 구간의 날씨 조각 하나. 검색어 벡터는 closet_search가 이미 만들었으므로
+     * 체감 온도가 있으면 그 온도 구간의 날씨 조각 하나, 상황에 비 이야기가 있으면 비 조각 하나. 검색어 벡터는 closet_search가 이미 만들었으므로
      * VectorStore.similaritySearch(다시 임베딩함) 대신 같은 표를 직접 찾는다.
      */
-    public List<Note> notesFor(float[] q, String occasion, Double apparentTemperature, int topK) {
+    public List<Note> notesFor(float[] q, String occasion, Double apparentTemperature, boolean rain, int topK) {
         var out = new LinkedHashMap<String, Note>();
         String vector = Vectors.literal(q);
         if (apparentTemperature != null) {
@@ -111,8 +111,15 @@ public class StyleKnowledge implements ApplicationRunner {
                     .query((rs, i) -> Map.entry(rs.getString("id"), new Note(rs.getString("content"), rs.getString("source"))))
                     .list().forEach(e -> out.putIfAbsent(e.getKey(), e.getValue()));
         }
-        String where = occasion == null ? "metadata::jsonb ->> 'occasion' <> 'weather'"
-                : "metadata::jsonb ->> 'occasion' IN (:occasion, 'any')";
+        String where = (occasion == null ? "metadata::jsonb ->> 'occasion' NOT IN ('weather', 'rain')"
+                : "metadata::jsonb ->> 'occasion' IN (:occasion, 'any')");
+        if (rain) {
+            jdbc.sql("SELECT id::text AS id, content, metadata::jsonb ->> 'source' AS source FROM closet.style_docs "
+                            + "WHERE metadata::jsonb ->> 'occasion' = 'rain' ORDER BY embedding <=> CAST(:q AS public.vector) LIMIT 1")
+                    .param("q", vector)
+                    .query((rs, i) -> Map.entry(rs.getString("id"), new Note(rs.getString("content"), rs.getString("source"))))
+                    .list().forEach(e -> out.putIfAbsent(e.getKey(), e.getValue()));
+        }
         var spec = jdbc.sql("SELECT id::text AS id, content, metadata::jsonb ->> 'source' AS source FROM closet.style_docs WHERE "
                         + where + " ORDER BY embedding <=> CAST(:q AS public.vector) LIMIT :k")
                 .param("q", vector).param("k", topK);

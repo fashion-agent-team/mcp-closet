@@ -1,5 +1,5 @@
 ---
-occasion: any
+occasion: rain
 ---
 # 비 오는 날
 

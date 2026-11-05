@@ -48,8 +48,8 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 ## closet_search
 
 1. `query: <situation>`을 임베딩합니다.
-2. 코디 지식: `occasion`이 있으면 그 자리 문서와 `any` 문서에서 가까운 조각 3개, `apparentTemperature`가 있으면 그 온도 구간의 날씨 조각 1개를 앞에 둡니다.
-3. 옷: 내 옷 전부를 정확한 거리로 정렬(한 사람 100벌 안팎, 근사 인덱스 없음, research R3) → `excludeGarmentIds` 빼기 → `CandidateFilter`로 빼기 → 종류별로 돌아가며 `limit`개(기본 8). 상의만 8벌 나오지 않게 하려는 것입니다.
+2. 코디 지식: `occasion`이 있으면 그 자리 문서와 `any` 문서에서 가까운 조각 3개, `apparentTemperature`가 있으면 그 온도 구간의 날씨 조각 1개, 상황 문장에 비 이야기(비·우산·장마…)가 있으면 비 조각 1개를 앞에 둡니다. 비 문서는 처음에 `any`였는데 어느 검색에나 끼어서 따로 뺐습니다.
+3. 옷: 내 옷 전부를 정확한 거리로 정렬(한 사람 100벌 안팎, 근사 인덱스 없음, research R3) → `excludeGarmentIds` 빼기 → `CandidateFilter`로 빼기 → 자리에 맞는 격식이면 점수에 최대 0.06 더해 다시 정렬 → 종류별로 돌아가며 `limit`개(기본 8). 상의만 8벌 나오지 않게 하려는 것입니다. 격식 가산점은 e5 점수가 옷끼리 0.77~0.84로 몰려서, 결혼식 검색에 반팔 티셔츠·스니커즈가 구두·슬랙스보다 먼저 나왔던 것을 고치려고 넣었습니다. 실행 결과는 프로젝트 파일 `mcp-closet/demo-result.md`.
 4. 옷장이 비면 `candidates: []`, `empty: true`.
 
 `CandidateFilter`는 앱의 `schedule_rules.dart`, `weather_rules.dart`가 "맞지 않아요"라고 하는 것만 뺍니다.
@@ -85,4 +85,4 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 
 - `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.
 - `E5OnnxEmbeddingModelTest`: `CLOSET_E5_DIR`(model.onnx, tokenizer.json)이 있을 때만.
-- 나머지는 순수 단위 테스트.
+- 나머지는 순수 단위 테스트. 모두 19개(실제 e5 3개 포함).

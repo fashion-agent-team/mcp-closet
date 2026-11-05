@@ -181,7 +181,7 @@ public class ClosetService {
             log.warn("검색어 임베딩 실패: {}", e.toString());
             throw ClosetException.upstreamFailed("지금은 옷장을 찾지 못했어요.");
         }
-        var notes = style.notesFor(q, occ, apparentTemperature, props.styleNotes());
+        var notes = style.notesFor(q, occ, apparentTemperature, mentionsRain(situation), props.styleNotes());
 
         boolean empty = garments.countByUser(userId) == 0;
         if (empty) {
@@ -189,8 +189,16 @@ public class ClosetService {
         }
         var ranked = garments.rankedForUser(userId, q, exclude).stream()
                 .filter(g -> !CandidateFilter.excluded(g, occ, apparentTemperature))
+                .map(g -> g.withSimilarity(g.similarity() + CandidateFilter.formalityBonus(occ, g.formality())))
+                .sorted(java.util.Comparator.comparingDouble(GarmentRepository.Candidate::similarity).reversed())
                 .toList();
         return result(diversify(ranked, n), notes, false);
+    }
+
+    /** 비 문서는 상황 문장에 비 이야기가 있을 때만 넣는다(아니면 어느 검색에나 끼어서). */
+    static boolean mentionsRain(String situation) {
+        return situation.contains("비 ") || situation.endsWith("비") || situation.contains("비가") || situation.contains("비와")
+                || situation.contains("우산") || situation.contains("장마") || situation.contains("소나기") || situation.contains("강수");
     }
 
     /**

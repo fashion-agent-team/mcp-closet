@@ -93,8 +93,12 @@ class McpServerTest {
         assertThat(sources).contains("style_docs/weather-9to12.md");
         // formal이면 formal·any 문서와 날씨 조각만
         assertThat(sources).allMatch(s -> List.of("style_docs/interview.md", "style_docs/weather-9to12.md",
-                "style_docs/color-basics.md", "style_docs/color-combos.md", "style_docs/pattern-material.md",
-                "style_docs/rain.md").contains(s));
+                "style_docs/color-basics.md", "style_docs/color-combos.md", "style_docs/pattern-material.md").contains(s));
+        // 비 이야기가 있을 때만 비 문서
+        JsonNode rainy = call("closet_search", Map.of("userId", user, "situation", "오후에 비 와요, 출근", "occasion", "business"));
+        var rainSources = new ArrayList<String>();
+        rainy.get("styleNotes").forEach(n -> rainSources.add(n.get("source").asString()));
+        assertThat(rainSources).contains("style_docs/rain.md");
         assertThat(r.get("styleNotes").get(0).get("text").asString()).isNotBlank();
     }
 

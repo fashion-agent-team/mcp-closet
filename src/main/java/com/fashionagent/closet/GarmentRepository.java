@@ -84,6 +84,10 @@ class GarmentRepository {
 
     record Candidate(String id, String category, String name, String colorName, String colorFamily, String tone,
                      String formality, String material, LocalDate lastWorn, double similarity) {
+
+        Candidate withSimilarity(double s) {
+            return new Candidate(id, category, name, colorName, colorFamily, tone, formality, material, lastWorn, s);
+        }
     }
 
     /** 내 옷 전부를 질문과 가까운 순으로(한 사람 100벌 안팎이라 정확한 거리로 다 훑는다, research R3). */

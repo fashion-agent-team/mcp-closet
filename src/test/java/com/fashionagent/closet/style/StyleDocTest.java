@@ -43,7 +43,7 @@ class StyleDocTest {
             assertThat(d.chunks()).as(d.source()).isNotEmpty();
             occasions.add(d.meta().get("occasion"));
         });
-        assertThat(occasions).contains("formal", "wedding", "mourning", "business", "active", "casual", "any", "weather");
+        assertThat(occasions).contains("formal", "wedding", "mourning", "business", "active", "casual", "any", "weather", "rain");
         var bands = docs.stream().filter(d -> "weather".equals(d.meta().get("occasion")))
                 .sorted((a, b) -> Double.compare((Double) a.meta().get("minTemp"), (Double) b.meta().get("minTemp"))).toList();
         for (int i = 1; i < bands.size(); i++) {

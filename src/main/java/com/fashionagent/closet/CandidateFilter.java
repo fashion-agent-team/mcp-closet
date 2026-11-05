@@ -24,6 +24,24 @@ final class CandidateFilter {
 
     private static final Set<String> BRIGHT = Set.of("red", "pink", "orange", "yellow", "green", "purple");
 
+    /**
+     * 자리에 잘 맞는 격식이면 점수를 조금 올린다. e5 점수는 옷끼리 0.77~0.84로 몰려 있어서
+     * 이것만으로는 면접에 정장이 위로 오지 않을 때가 있다. 빼는 것({@link #excluded})과 달리 순서만 바꾼다.
+     */
+    static double formalityBonus(String occasion, String formality) {
+        if (occasion == null) {
+            return 0;
+        }
+        return switch (occasion) {
+            case "formal", "mourning" -> switch (formality) { case "formal" -> 0.06; case "smart" -> 0.03; default -> 0; };
+            case "wedding" -> switch (formality) { case "smart" -> 0.06; case "formal" -> 0.05; default -> 0; };
+            case "business" -> switch (formality) { case "smart" -> 0.06; case "formal" -> 0.04; default -> 0; };
+            case "active" -> switch (formality) { case "sporty" -> 0.06; case "casual" -> 0.03; default -> 0; };
+            case "casual" -> switch (formality) { case "casual" -> 0.04; case "sporty", "smart" -> 0.02; default -> 0; };
+            default -> 0;
+        };
+    }
+
     /** 이 옷을 후보에서 빼야 하면 true. */
     static boolean excluded(GarmentRepository.Candidate g, String occasion, Double apparentTemperature) {
         if (occasion != null) {

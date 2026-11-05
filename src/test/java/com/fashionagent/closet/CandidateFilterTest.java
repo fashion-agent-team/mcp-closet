@@ -37,6 +37,19 @@ class CandidateFilterTest {
     }
 
     @Test
+    @DisplayName("자리에 맞는 격식이면 점수를 조금 올리고, 비 이야기는 낱말로 알아본다")
+    void bonusAndRain() {
+        assertThat(CandidateFilter.formalityBonus("formal", "formal")).isGreaterThan(CandidateFilter.formalityBonus("formal", "smart"));
+        assertThat(CandidateFilter.formalityBonus("active", "sporty")).isPositive();
+        assertThat(CandidateFilter.formalityBonus("active", "formal")).isZero();
+        assertThat(CandidateFilter.formalityBonus(null, "formal")).isZero();
+        assertThat(ClosetService.mentionsRain("오후에 비 와요")).isTrue();
+        assertThat(ClosetService.mentionsRain("우산 챙겨야 하는 날")).isTrue();
+        assertThat(ClosetService.mentionsRain("친구 결혼식, 체감 15도")).isFalse();
+        assertThat(ClosetService.mentionsRain("비즈니스 미팅")).isFalse();
+    }
+
+    @Test
     @DisplayName("diversify: 가까운 순을 지키며 종류를 돌아가며 고른다")
     void diversify() {
         var ranked = List.of(g("t1", "top", "a", "gray", "smart", null, 0.9), g("t2", "top", "b", "gray", "smart", null, 0.85),

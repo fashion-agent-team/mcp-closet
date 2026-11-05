@@ -14,7 +14,7 @@
 
 | 도구 | 하는 일 |
 | --- | --- |
-| `closet_search` | RAG의 검색 단계. 상황(일정·날씨 문장)에 맞는 내 옷 후보 + 코디 지식 문서. 생성(추천 문장)은 agent의 Gemini가 함 |
+| `closet_search` | RAG의 검색 단계. 상황(일정·날씨 문장)에 맞는 내 옷 후보 + 코디 지식 문서. 생성(추천 문장)은 agent의 GPT가 함 |
 | `closet_save` | 옷 추천을 마칠 때 본 옷을 기록. 같은 옷이면 합침(임베딩 유사도 + 종류·색) |
 | `closet_wear` | 입은 날 기록 |
 
@@ -29,10 +29,33 @@
 
 ## 할 일
 
-- [ ] 뼈대 + `/mcp` + Dockerfile, pgvector 확장
-- [ ] `closet_save`(중복 합치기 포함), `closet_wear`
-- [ ] 임베딩 모델(ONNX) 붙이기, `closet_search`
-- [ ] 코디 지식 문서 10~20개 쓰기
+- [x] 뼈대 + `/mcp` + Dockerfile, pgvector 확장
+- [x] `closet_save`(중복 합치기 포함), `closet_wear`
+- [x] 임베딩 모델(ONNX) 붙이기, `closet_search`
+- [x] 코디 지식 문서 10~20개 쓰기 (17개, `src/main/resources/style_docs/`)
+- [ ] agent에 붙여 옷 추천 1단계에서 불러 보기
+- [ ] 실제 옷 사진으로 같은 옷 합치기 기준값(0.90) 다시 확인
+
+## 실행
+
+```bash
+# PostgreSQL + pgvector가 떠 있어야 합니다(앱 레포 docs/infra/docker-compose.yml의 postgres).
+SPRING_DATASOURCE_PASSWORD=… ./gradlew bootRun          # 처음 뜰 때 e5 모델(약 118MB)을 models/에 내려받음
+CLOSET_EMBEDDING_PROVIDER=hash ./gradlew bootRun        # 모델 없이 띄우기(개발용, 검색 품질 없음)
+./gradlew test                                          # Docker 필요(Testcontainers pgvector). 없으면 DB 테스트는 건너뜀
+CLOSET_E5_DIR=/path/to/e5 ./gradlew test                # model.onnx·tokenizer.json이 있으면 실제 e5 테스트도 돎
+docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # 모델을 이미지에 넣음
+```
+
+| 환경 변수 | 기본값 | 뜻 |
+| --- | --- | --- |
+| `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | `jdbc:postgresql://localhost:5432/fashion` / `fashion` / (없음) | 공용 DB |
+| `CLOSET_EMBEDDING_PROVIDER` | `onnx` | `onnx`(multilingual-e5-small) 또는 `hash`(개발용) |
+| `CLOSET_EMBEDDING_MODEL_URI` / `CLOSET_EMBEDDING_TOKENIZER_URI` | Hugging Face `Xenova/multilingual-e5-small` 양자화 ONNX | `https:`, `file:`, `classpath:` |
+| `CLOSET_MODEL_DIR` | `models` | 내려받은 모델 둘 곳 |
+| `CLOSET_SAME_GARMENT_THRESHOLD` | `0.90` | 같은 옷으로 합치는 유사도 기준 |
+
+API 키는 필요 없습니다(임베딩은 서버 CPU에서 돌고, GPT는 agent가 부릅니다). 만든 방식과 잰 숫자는 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)에 있습니다.
 
 ## 공통 약속
 
@@ -58,4 +81,4 @@ GitFlow를 따릅니다. `develop`에서 `feature/…` 브랜치를 따서 PR로
 
 ## 비밀 값
 
-API 키와 DB 비밀번호는 레포에 넣지 않습니다. 로컬은 `.env`(커밋 금지), 배포는 서버 환경 변수로 둡니다. 목록은 앱 레포 `docs/infra/.env.example`에 있습니다.
+이 서버는 API 키를 쓰지 않습니다. DB 비밀번호는 레포에 넣지 않습니다. 로컬은 `.env`(커밋 금지), 배포는 서버 환경 변수로 둡니다. 목록은 앱 레포 `docs/infra/.env.example`에 있습니다.

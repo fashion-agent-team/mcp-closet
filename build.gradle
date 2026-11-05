@@ -1,0 +1,55 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.0.9'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.fashionagent'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom 'org.springframework.ai:spring-ai-bom:2.0.2'
+    }
+}
+
+dependencies {
+    implementation 'org.springframework.ai:spring-ai-starter-mcp-server-webmvc'
+    // 코디 지식(style_docs)은 Spring AI PgVectorStore로, 내 옷(garments)은 JdbcClient로 직접 다룬다.
+    implementation 'org.springframework.ai:spring-ai-starter-vector-store-pgvector'
+    // multilingual-e5-small을 ONNX Runtime으로 서버 CPU에서 돌린다(호출 비용 없음).
+    // spring-ai-transformers는 평균 풀링에 DJL PyTorch 엔진(실행 때 libtorch 수백 MB 내려받음)을 써서,
+    // 토크나이저와 ONNX Runtime만 직접 쓴다(풀링·정규화는 E5OnnxEmbeddingModel에서 계산).
+    implementation 'ai.djl.huggingface:tokenizers:0.36.0'
+    implementation 'com.microsoft.onnxruntime:onnxruntime:1.21.1'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// 실행용 jar 하나만 만든다(Dockerfile이 mcp-closet-*.jar를 복사).
+tasks.named('jar') {
+    enabled = false
+}

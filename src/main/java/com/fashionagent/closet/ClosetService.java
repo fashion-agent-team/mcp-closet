@@ -187,9 +187,11 @@ public class ClosetService {
         if (empty) {
             return result(List.of(), notes, true);
         }
+        LocalDate today = LocalDate.now(clock.withZone(SEOUL));
         var ranked = garments.rankedForUser(userId, q, exclude).stream()
                 .filter(g -> !CandidateFilter.excluded(g, occ, apparentTemperature))
-                .map(g -> g.withSimilarity(g.similarity() + CandidateFilter.formalityBonus(occ, g.formality())))
+                .map(g -> g.withSimilarity(g.similarity() + CandidateFilter.formalityBonus(occ, g.formality())
+                        - CandidateFilter.recencyPenalty(g.lastWorn(), today)))
                 .sorted(java.util.Comparator.comparingDouble(GarmentRepository.Candidate::similarity).reversed())
                 .toList();
         return result(diversify(ranked, n), notes, false);
@@ -226,6 +228,50 @@ public class ClosetService {
             }
         }
         return out;
+    }
+
+    public record OutfitGarment(String garmentId, String category, String name, String colorName, String formality) {
+    }
+
+    public record Outfit(LocalDate date, List<OutfitGarment> garments) {
+    }
+
+    /**
+     * closet_outfits. 같은 날 입은 옷(closet_wear 기록)을 한 벌 조합으로 묶어 최근 날부터 돌려준다.
+     * garmentId를 주면 그 옷을 입은 날만("이 셔츠 지난번에 뭐랑 입었지?").
+     */
+    public Map<String, Object> outfits(UUID userId, String from, String to, String garmentId, Integer limit) {
+        LocalDate today = LocalDate.now(clock.withZone(SEOUL));
+        LocalDate end = to == null || to.isBlank() ? today : parseDay(to, "to");
+        LocalDate start = from == null || from.isBlank() ? end.minusDays(90) : parseDay(from, "from");
+        if (start.isAfter(end)) {
+            throw ClosetException.badRequest("from이 to보다 뒤예요.");
+        }
+        int n = limit == null || limit <= 0 ? 5 : Math.min(limit, 30);
+        String gid = garmentId == null || garmentId.isBlank() ? null : garmentId.trim();
+        if (gid != null && garments.ownedIds(userId, List.of(gid)).isEmpty()) {
+            throw ClosetException.notFound("옷장에 없는 옷이에요: " + gid);
+        }
+        var days = garments.wornDays(userId, start, end, gid, n);
+        if (days.isEmpty()) {
+            return Map.of("outfits", List.of());
+        }
+        var byDay = new LinkedHashMap<LocalDate, List<OutfitGarment>>();
+        days.forEach(d -> byDay.put(d, new ArrayList<>()));
+        for (var row : garments.wornOn(userId, days)) {
+            byDay.get(row.day()).add(new OutfitGarment(row.id(), row.category(), row.name(), row.colorName(), row.formality()));
+        }
+        var out = new ArrayList<Outfit>();
+        byDay.forEach((d, list) -> out.add(new Outfit(d, list)));
+        return Map.of("outfits", out);
+    }
+
+    private static LocalDate parseDay(String value, String field) {
+        try {
+            return LocalDate.parse(value.trim().length() > 10 ? value.trim().substring(0, 10) : value.trim());
+        } catch (RuntimeException e) {
+            throw ClosetException.badRequest(field + "는 2026-11-04 같은 모양이어야 해요.");
+        }
     }
 
     private static Map<String, Object> result(List<CandidateOut> candidates, List<StyleKnowledge.Note> notes, boolean empty) {

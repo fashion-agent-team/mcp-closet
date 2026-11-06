@@ -82,6 +82,34 @@ class GarmentRepository {
                 .update();
     }
 
+    /** 입은 날 목록(최근부터 limit개). garmentId가 있으면 그 옷을 입은 날만. */
+    List<LocalDate> wornDays(UUID userId, LocalDate from, LocalDate to, String garmentId, int limit) {
+        String byGarment = garmentId == null ? "" : " AND garment_id = :garmentId";
+        var spec = jdbc.sql("SELECT DISTINCT worn_on FROM closet.wears WHERE user_id = :userId AND worn_on BETWEEN :from AND :to"
+                        + byGarment + " ORDER BY worn_on DESC LIMIT :limit")
+                .param("userId", userId).param("from", from).param("to", to).param("limit", limit);
+        if (garmentId != null) {
+            spec = spec.param("garmentId", garmentId);
+        }
+        return spec.query(LocalDate.class).list();
+    }
+
+    record WornRow(LocalDate day, String id, String category, String name, String colorName, String formality) {
+    }
+
+    /** 그 날들에 입은 옷. 날은 최근부터, 한 날 안에서는 겉옷·상의·원피스·하의·신발·기타 순. */
+    List<WornRow> wornOn(UUID userId, Collection<LocalDate> days) {
+        return jdbc.sql("""
+                        SELECT w.worn_on, g.id, g.category, g.name, g.color_name, g.formality
+                          FROM closet.wears w JOIN closet.garments g ON g.id = w.garment_id AND g.user_id = w.user_id
+                         WHERE w.user_id = :userId AND w.worn_on IN (:days)
+                         ORDER BY w.worn_on DESC, array_position(ARRAY['outer','top','dress','bottom','shoes','other']::varchar[], g.category), g.id""")
+                .param("userId", userId).param("days", days)
+                .query((rs, i) -> new WornRow(rs.getObject("worn_on", LocalDate.class), rs.getString("id"), rs.getString("category"),
+                        rs.getString("name"), rs.getString("color_name"), rs.getString("formality")))
+                .list();
+    }
+
     record Candidate(String id, String category, String name, String colorName, String colorFamily, String tone,
                      String formality, String material, LocalDate lastWorn, double similarity) {
 

@@ -49,6 +49,15 @@ public class ClosetService {
     /** closet_save. 같은 옷(종류·색 계열·이름 묶음이 같고 유사도가 기준 이상)이면 새로 만들지 않고 합친다. */
     @Transactional
     public Map<String, Object> save(UUID userId, List<Garment> input) {
+        return save(userId, input, List.of());
+    }
+
+    /**
+     * forceNewIds: 사용자가 "다른 옷이에요"라고 한 입력 id(Garment.id). 비슷해도 합치지 않고 새로 만든다.
+     * 한 번에 받은 옷끼리는 서로 합치지 않고, 같은 기존 옷에 두 벌을 합치지도 않는다(한 사진에 같이 있으면 다른 옷).
+     */
+    @Transactional
+    public Map<String, Object> save(UUID userId, List<Garment> input, List<String> forceNewIds) {
         if (input == null || input.isEmpty()) {
             throw ClosetException.badRequest("garments가 비어 있어요.");
         }
@@ -66,18 +75,27 @@ public class ClosetService {
 
         OffsetDateTime now = OffsetDateTime.now(clock);
         int size = garments.countByUser(userId);
+        var forceNew = forceNewIds == null ? java.util.Set.<String>of()
+                : forceNewIds.stream().filter(s -> s != null && !s.isBlank()).map(String::trim).collect(java.util.stream.Collectors.toSet());
+        var taken = new java.util.HashSet<String>();
         var saved = new ArrayList<Saved>();
         for (int i = 0; i < input.size(); i++) {
             Garment g = input.get(i);
             Garment.Normalized n = normalized.get(i);
             float[] v = vectors == null ? null : vectors.get(i);
-            var same = v == null ? java.util.Optional.<GarmentRepository.Match>empty()
+            boolean mayMerge = v != null && (g.id() == null || !forceNew.contains(g.id().trim()));
+            var same = !mayMerge ? java.util.Optional.<GarmentRepository.Match>empty()
                     : garments.nearestSame(userId, n.category(), n.colorFamily(), v, 5).stream()
+                            .filter(m -> !taken.contains(m.id()))
                             .filter(m -> m.similarity() >= props.sameGarmentThreshold() && GarmentNames.sameKind(m.name(), n.name()))
+                            .filter(m -> !SameGarment.conflicts(n.tone(), n.pattern(), m.tone(), m.pattern()))
                             .findFirst();
             if (same.isPresent()) {
                 String id = same.get().id();
-                garments.update(id, userId, n, describe(g, id), v, now);
+                // 이번 사진에서 무늬를 못 봤으면 전에 본 무늬를 남긴다(다음에 다른 무늬 옷과 가를 수 있게)
+                Garment kept = g.pattern() == null || g.pattern().isBlank() ? g.withPattern(same.get().pattern()) : g;
+                garments.update(id, userId, n, describe(kept, id), v, now);
+                taken.add(id);
                 saved.add(new Saved(g.id(), id, false));
                 continue;
             }
@@ -86,6 +104,7 @@ public class ClosetService {
             }
             String id = Ids.garmentId();
             garments.insert(id, userId, n, describe(g, id), v, now);
+            taken.add(id);
             size++;
             saved.add(new Saved(g.id(), id, true));
         }

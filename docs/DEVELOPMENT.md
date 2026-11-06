@@ -11,6 +11,7 @@
 | `GarmentRepository` | `closet.garments`, `closet.wears` (JdbcClient, SQL은 data-model.md 3절) |
 | `CandidateFilter` | `occasion`·`apparentTemperature`로 맞지 않는 옷 빼기, 최근 입은 옷 감점 |
 | `GarmentNames` | 같은 옷인지 볼 때 이름 비교(니트=스웨터, 자켓=재킷 …) |
+| `SameGarment` | 같은 옷 후보라도 톤(light↔dark)·무늬가 다르면 다른 옷 |
 | `style/StyleKnowledge` | 코디 지식 문서를 뜰 때 `closet.style_docs`에 맞춰 넣고, 검색 때 조각을 찾음 |
 | `embedding/E5OnnxEmbeddingModel` | multilingual-e5-small을 ONNX Runtime으로 돌림(평균 풀링 + 길이 1) |
 | `embedding/HashEmbeddingModel` | 모델 없이 띄울 때(테스트·개발). 뜻을 모름 |
@@ -41,7 +42,26 @@ RAG 나누기: 이 서버는 **검색**만 합니다. 찾은 옷 후보와 코�
 | 맨투맨, 회색 | 0.891 | 0.902 / 0.900 | 다름 |
 | 검색: "면접, 체감 9도" ↔ 면접 문서 / 등산 문서 | 0.839 / 0.806 | 0.841 / 0.808 (fp32) | |
 
-e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도만으로는 같은 니트와 같은 색 가디건을 가르지 못합니다. 그래서 유사도는 낮게(0.90) 두고 이름 묶음으로 거릅니다. 한계: 같은 색 니트 두 벌은 한 벌로 합쳐질 수 있습니다. 실제 옷 사진으로 clothes_inspect 결과를 모아 다시 확인할 일입니다.
+e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도만으로는 같은 니트와 같은 색 가디건을 가르지 못합니다. 그래서 유사도는 낮게(0.90) 두고 이름 묶음으로 거릅니다.
+
+같은 색 니트가 두 벌인 경우(`SameGarment`, 2026-11-06):
+
+- 톤이 light↔dark로 다르거나, 둘 다 무늬가 적혀 있는데 다르면(무지↔스트라이프, 스트라이프↔체크) 다른 옷. mid와 모르는 무늬(null)는 다르다고 보지 않습니다(조명·사진마다 빠질 수 있어서). 줄무늬=스트라이프처럼 같은 무늬 이름은 맞춥니다.
+- 합칠 때 이번 사진에 무늬가 없으면 전에 본 무늬를 남깁니다. 안 그러면 다음에 스트라이프 니트가 와도 가르지 못합니다.
+- 한 번의 closet_save에 온 옷끼리는 합치지 않고, 두 벌을 같은 옛 옷 하나에 몰지 않습니다(한 사진에 같이 있으면 다른 옷).
+- `forceNewIds`: 사용자가 "그건 다른 옷"이라고 하면 agent가 그 입력 id를 넣어 다시 부릅니다.
+
+공식 e5로 잰 결과(기준: 차콜 그레이 무지 니트):
+
+| 들어온 옷 | 전 | 지금 | 기준과 유사도 |
+| --- | --- | --- | --- |
+| 같은 니트를 "스웨터, 진회색"으로 다시 봄(무늬 안 적힘) | 합침 | 합침 | - |
+| 차콜 스트라이프 니트 | 합침 | 새 옷 | 0.923 |
+| 연회색 니트(light) | 합침 | 새 옷 | 0.956 |
+| 한 사진에 똑같은 차콜 무지 니트 두 벌 | 둘 다 합침 | 하나는 합침, 하나는 새 옷 | 1.000 |
+| 사용자가 다른 옷이라고 함(forceNewIds) | 합침 | 새 옷 | 0.988 |
+
+남는 한계: 무늬·톤까지 똑같은 니트 두 벌을 다른 날 따로 찍으면 여전히 한 벌로 합칩니다. 글 설명만으로는 가를 수 없어서 사용자에게 묻는 것(forceNewIds)으로 풉니다. 사진 벡터(CLIP 등)를 쓰면 더 가를 수 있지만 보류 중입니다.
 
 "공식 Xenova 양자화"는 Hugging Face에서 받은 `onnx/model_quantized.onnx`(118,308,185바이트, sha256 `f80102d3…c193`)와 `tokenizer.json`(sha256 `0b44a9d7…4c39`)으로 Python onnxruntime에서 같은 계산을 한 값입니다(입력 input_ids·attention_mask·token_type_ids, 출력 last_hidden_state). "직접 변환"은 Hugging Face가 막힌 개발 컨테이너에서 공개 Docker 이미지의 e5-small 가중치를 ONNX로 바꿔 Java 쪽(`E5OnnxEmbeddingModel`)에서 잰 값입니다. 둘의 차이는 0.01 안쪽이고, 같은 옷은 공식 파일에서도 모두 0.90 이상(가장 낮은 것 0.914)입니다.
 
@@ -91,4 +111,4 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 
 - `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.
 - `E5OnnxEmbeddingModelTest`: `CLOSET_E5_DIR`(model.onnx, tokenizer.json)이 있을 때만.
-- 나머지는 순수 단위 테스트. 모두 22개(실제 e5 3개 포함).
+- 나머지는 순수 단위 테스트. 모두 25개(실제 e5 3개 포함).

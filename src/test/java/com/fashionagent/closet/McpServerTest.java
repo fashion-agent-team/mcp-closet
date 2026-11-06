@@ -62,12 +62,14 @@ class McpServerTest {
     }
 
     @Test
-    @DisplayName("tools list에 closet 도구 3개가 있고 필수 입력이 맞다")
+    @DisplayName("tools list에 closet 도구 4개가 있고 필수 입력이 맞다")
     @SuppressWarnings("unchecked")
     void toolsList() {
         var tools = client.listTools().tools();
         assertThat(tools).extracting(McpSchema.Tool::name)
-                .containsExactlyInAnyOrder("closet_search", "closet_save", "closet_wear");
+                .containsExactlyInAnyOrder("closet_search", "closet_save", "closet_wear", "closet_outfits");
+        var outfits = tools.stream().filter(t -> t.name().equals("closet_outfits")).findFirst().orElseThrow();
+        assertThat((List<String>) outfits.inputSchema().get("required")).containsExactly("userId");
         var search = tools.stream().filter(t -> t.name().equals("closet_search")).findFirst().orElseThrow();
         assertThat((List<String>) search.inputSchema().get("required")).containsExactlyInAnyOrder("userId", "situation");
         var save = tools.stream().filter(t -> t.name().equals("closet_save")).findFirst().orElseThrow();
@@ -218,6 +220,55 @@ class McpServerTest {
 
         JsonNode bad = call("closet_search", Map.of("userId", user, "situation", "등산", "occasion", "party"));
         assertThat(bad.get("error").get("code").asString()).isEqualTo("bad_request");
+    }
+
+    @Test
+    @DisplayName("입은 조합: 같은 날 입은 옷을 묶어 최근 날부터, 옷으로 거르기, 남의 옷은 not_found")
+    void outfits() {
+        String shirt = saveOne("top", "셔츠", "흰색", "white", "light", "smart");
+        String slacks = saveOne("bottom", "슬랙스", "검은색", "black", "dark", "formal");
+        String jacket = saveOne("outer", "자켓", "남색", "navy", "dark", "smart");
+        String jeans = saveOne("bottom", "청바지", "연청", "blue", "light", "casual");
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt, slacks, jacket), "date", "2026-10-28"));
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt, jeans), "date", "2026-11-03"));
+
+        JsonNode r = call("closet_outfits", Map.of("userId", user));
+        assertThat(r.get("outfits").size()).isEqualTo(2);
+        JsonNode latest = r.get("outfits").get(0);
+        assertThat(latest.get("date").asString()).isEqualTo("2026-11-03");
+        var latestIds = new ArrayList<String>();
+        latest.get("garments").forEach(g -> latestIds.add(g.get("garmentId").asString()));
+        assertThat(latestIds).containsExactly(shirt, jeans);   // 상의 → 하의 순
+        JsonNode older = r.get("outfits").get(1);
+        assertThat(older.get("garments").get(0).get("name").asString()).isEqualTo("자켓");   // 겉옷이 먼저
+
+        JsonNode withSlacks = call("closet_outfits", Map.of("userId", user, "garmentId", slacks));
+        assertThat(withSlacks.get("outfits").size()).isEqualTo(1);
+        assertThat(withSlacks.get("outfits").get(0).get("garments").size()).isEqualTo(3);
+
+        JsonNode range = call("closet_outfits", Map.of("userId", user, "from", "2026-10-01", "to", "2026-10-31"));
+        assertThat(range.get("outfits").size()).isEqualTo(1);
+        assertThat(call("closet_outfits", Map.of("userId", user, "limit", 1)).get("outfits").size()).isEqualTo(1);
+
+        assertThat(call("closet_outfits", Map.of("userId", UUID.randomUUID().toString(), "garmentId", shirt))
+                .get("error").get("code").asString()).isEqualTo("not_found");
+        assertThat(call("closet_outfits", Map.of("userId", UUID.randomUUID().toString())).get("outfits").size()).isZero();
+        assertThat(call("closet_outfits", Map.of("userId", user, "from", "2026-11-05", "to", "2026-11-01"))
+                .get("error").get("code").asString()).isEqualTo("bad_request");
+    }
+
+    @Test
+    @DisplayName("어제 입은 옷은 점수가 낮아져 같은 종류 안에서 뒤로 간다")
+    void recentlyWornGoesDown() {
+        // hash 임베딩에서 같은 글이면 같은 점수라, 같은 설명의 셔츠 두 벌(색 이름만 다름)로 비교한다
+        String a = saveOne("top", "셔츠", "흰색", "white", "light", "smart");
+        String b = saveOne("top", "셔츠", "흰색 ", "gray", "light", "smart");
+        JsonNode before = call("closet_search", Map.of("userId", user, "situation", "출근", "limit", 2));
+        String first = before.get("candidates").get(0).get("garmentId").asString();
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(first), "date", "2026-11-03"));   // 어제(서울 11-04 기준)
+        JsonNode after = call("closet_search", Map.of("userId", user, "situation", "출근", "limit", 2));
+        assertThat(after.get("candidates").get(0).get("garmentId").asString()).isNotEqualTo(first).isIn(a, b);
+        assertThat(find(after, first).get("lastWorn").asString()).isEqualTo("2026-11-03");
     }
 
     private JsonNode find(JsonNode r, String id) {

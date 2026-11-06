@@ -17,6 +17,7 @@
 | `closet_search` | RAG의 검색 단계. 상황(일정·날씨 문장)에 맞는 내 옷 후보 + 코디 지식 문서. 생성(추천 문장)은 agent의 GPT가 함 |
 | `closet_save` | 옷 추천을 마칠 때 본 옷을 기록. 같은 옷이면 합침(임베딩 유사도 + 종류·색) |
 | `closet_wear` | 입은 날 기록 |
+| `closet_outfits` | 예전에 입은 조합(같은 날 입은 옷을 한 벌로). "지난번 면접 때 뭐 입었지?" |
 
 입출력 JSON은 [MCP 도구 입출력](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/mcp-tools.md)를 그대로 따릅니다.
 

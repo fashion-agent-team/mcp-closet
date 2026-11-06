@@ -6,10 +6,10 @@
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `ClosetTools` | MCP 도구 3개(`closet_search`, `closet_save`, `closet_wear`). 실패는 `{"error": {"code", "message"}}` |
+| `ClosetTools` | MCP 도구 4개(`closet_search`, `closet_save`, `closet_wear`, `closet_outfits`). 실패는 `{"error": {"code", "message"}}` |
 | `ClosetService` | 도구의 실제 일. 같은 옷 합치기, 입은 날, 검색 후보 고르기 |
 | `GarmentRepository` | `closet.garments`, `closet.wears` (JdbcClient, SQL은 data-model.md 3절) |
-| `CandidateFilter` | `occasion`·`apparentTemperature`로 맞지 않는 옷 빼기 |
+| `CandidateFilter` | `occasion`·`apparentTemperature`로 맞지 않는 옷 빼기, 최근 입은 옷 감점 |
 | `GarmentNames` | 같은 옷인지 볼 때 이름 비교(니트=스웨터, 자켓=재킷 …) |
 | `style/StyleKnowledge` | 코디 지식 문서를 뜰 때 `closet.style_docs`에 맞춰 넣고, 검색 때 조각을 찾음 |
 | `embedding/E5OnnxEmbeddingModel` | multilingual-e5-small을 ONNX Runtime으로 돌림(평균 풀링 + 길이 1) |
@@ -66,6 +66,12 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 
 격식 `unknown`처럼 애매한 옷은 남기고 GPT가 고르게 합니다.
 
+최근 입은 옷: 어제 0.06, 그제 0.04, 3~7일 전 0.02를 점수에서 뺍니다. 빼지 않고 뒤로만 보내는 것은 옷이 적은 사람도 추천을 받게 하려는 것이고, 오늘 입은 옷은 같은 날 다시 고르는 중일 수 있어 그대로 둡니다. 출력 `score`는 가산점·감점을 더한 값입니다.
+
+## closet_outfits
+
+새 표 없이 `wears`만 씁니다. 같은 날 `closet_wear`로 기록한 옷 = 그날의 조합. 최근 날부터 `limit`개(기본 5, 최대 30), 기간 기본 90일. `garmentId`를 주면 그 옷을 입은 날만. 한계: 하루에 두 번 갈아입으면 한 벌로 묶이고, 그날의 자리(면접 등)는 저장하지 않으므로 agent가 `schedule_list`로 날짜를 찾아 넘깁니다.
+
 ## closet_wear
 
 `garmentIds`가 모두 이 사람 옷이어야 기록합니다. 하나라도 없거나 남의 옷이면 `not_found`이고 아무것도 기록하지 않습니다(agent는 closet_save가 준 id만 넘기므로 섞이면 버그). 같은 옷 같은 날은 한 번만(`ON CONFLICT DO NOTHING`). `date`가 없으면 서울 기준 오늘, 내일보다 뒤면 `bad_request`.
@@ -85,4 +91,4 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 
 - `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.
 - `E5OnnxEmbeddingModelTest`: `CLOSET_E5_DIR`(model.onnx, tokenizer.json)이 있을 때만.
-- 나머지는 순수 단위 테스트. 모두 19개(실제 e5 3개 포함).
+- 나머지는 순수 단위 테스트. 모두 22개(실제 e5 3개 포함).

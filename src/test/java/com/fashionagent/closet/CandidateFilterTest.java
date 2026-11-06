@@ -50,6 +50,18 @@ class CandidateFilterTest {
     }
 
     @Test
+    @DisplayName("최근 입은 옷 감점: 어제 > 그제 > 일주일 안, 오늘·오래전은 없음")
+    void recency() {
+        var today = java.time.LocalDate.parse("2026-11-04");
+        assertThat(CandidateFilter.recencyPenalty(today.minusDays(1), today)).isEqualTo(0.06);
+        assertThat(CandidateFilter.recencyPenalty(today.minusDays(2), today)).isEqualTo(0.04);
+        assertThat(CandidateFilter.recencyPenalty(today.minusDays(7), today)).isEqualTo(0.02);
+        assertThat(CandidateFilter.recencyPenalty(today.minusDays(8), today)).isZero();
+        assertThat(CandidateFilter.recencyPenalty(today, today)).isZero();
+        assertThat(CandidateFilter.recencyPenalty(null, today)).isZero();
+    }
+
+    @Test
     @DisplayName("diversify: 가까운 순을 지키며 종류를 돌아가며 고른다")
     void diversify() {
         var ranked = List.of(g("t1", "top", "a", "gray", "smart", null, 0.9), g("t2", "top", "b", "gray", "smart", null, 0.85),

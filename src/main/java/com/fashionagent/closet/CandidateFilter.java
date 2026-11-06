@@ -42,6 +42,24 @@ final class CandidateFilter {
         };
     }
 
+    /**
+     * 최근에 입은 옷은 점수를 조금 낮춘다(빼지는 않음: 옷이 적은 사람은 같은 옷을 또 입어야 한다).
+     * 어제 0.06, 그제 0.04, 일주일 안 0.02. 오늘 입은 옷은 같은 날 다시 고르는 중일 수 있어 그대로 둔다.
+     */
+    static double recencyPenalty(java.time.LocalDate lastWorn, java.time.LocalDate today) {
+        if (lastWorn == null) {
+            return 0;
+        }
+        long days = java.time.temporal.ChronoUnit.DAYS.between(lastWorn, today);
+        if (days == 1) {
+            return 0.06;
+        }
+        if (days == 2) {
+            return 0.04;
+        }
+        return days >= 3 && days <= 7 ? 0.02 : 0;
+    }
+
     /** 이 옷을 후보에서 빼야 하면 true. */
     static boolean excluded(GarmentRepository.Candidate g, String occasion, Double apparentTemperature) {
         if (occasion != null) {

@@ -62,8 +62,15 @@ public class EmbeddingConfig {
         log.info("모델 내려받는 중: {} → {}", uri, target);
         HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(java.time.Duration.ofSeconds(20)).build();
         Path tmp = target.resolveSibling(target.getFileName() + ".part");
-        HttpResponse<Path> res = http.send(HttpRequest.newBuilder(URI.create(uri)).timeout(e.downloadTimeout()).GET().build(),
-                HttpResponse.BodyHandlers.ofFile(tmp));
+        HttpResponse<Path> res;
+        try {
+            res = http.send(HttpRequest.newBuilder(URI.create(uri)).timeout(e.downloadTimeout()).GET().build(),
+                    HttpResponse.BodyHandlers.ofFile(tmp));
+        } catch (IOException ex) {
+            Files.deleteIfExists(tmp);
+            throw new IOException("모델을 내려받지 못했어요(" + ex.getClass().getSimpleName() + "): " + uri
+                    + ". 이미지에 모델이 들어 있으면 " + target + "를 읽을 수 있는지 보세요.", ex);
+        }
         if (res.statusCode() != 200) {
             Files.deleteIfExists(tmp);
             throw new IOException("모델을 내려받지 못했어요(HTTP " + res.statusCode() + "): " + uri);

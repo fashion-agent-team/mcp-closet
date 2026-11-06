@@ -107,6 +107,12 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 | closet_search | 44~74ms | 43~126ms |
 | bootJar 크기 | 199MB (ONNX Runtime·토크나이저 네이티브 라이브러리 포함) | |
 
+## Docker 이미지 (2026-11-06 빌드해 봄)
+
+- 모델 두 파일은 `ADD --checksum=sha256:…`로 넣습니다. 받은 파일이 Hugging Face 공식 파일과 다르면 빌드가 멈춥니다. Hugging Face가 막힌 곳에서는 `MODEL_BASE_URL`로 다른 주소를 줍니다(개발 컨테이너에서는 받아 둔 공식 파일을 로컬 HTTP로 띄워 빌드함, sha256 같음).
+- 처음 빌드해 보니 `ADD --chmod=644`가 만든 `/app/models` 폴더까지 644(들어갈 수 없음)가 되어, `USER 1000`인 서버가 모델을 못 보고 Hugging Face에서 다시 받으려다 죽었습니다. 폴더를 `mkdir -m 755`로 먼저 만들어 고쳤습니다.
+- 잰 값(개발 컨테이너, 메모리 제한 1.5GB): 이미지 1.07GB(압축 391MB, JRE·bootJar 199MB·모델 135MB), 뜨는 시간 약 10초(모델 준비 4.1초), 옷 9벌 저장·검색 뒤 메모리 약 770MB. 뜰 때 모델을 내려받지 않음(로그 확인), health UP, closet_save·closet_search 정상.
+
 ## 테스트
 
 - `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.

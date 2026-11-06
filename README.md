@@ -45,7 +45,8 @@ SPRING_DATASOURCE_PASSWORD=… ./gradlew bootRun          # 처음 뜰 때 e5 �
 CLOSET_EMBEDDING_PROVIDER=hash ./gradlew bootRun        # 모델 없이 띄우기(개발용, 검색 품질 없음)
 ./gradlew test                                          # Docker 필요(Testcontainers pgvector). 없으면 DB 테스트는 건너뜀
 CLOSET_E5_DIR=/path/to/e5 ./gradlew test                # model.onnx·tokenizer.json이 있으면 실제 e5 테스트도 돎
-docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # 모델을 이미지에 넣음
+docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # 모델을 이미지에 넣음(Hugging Face에서 받고 sha256 검사)
+docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Hugging Face가 막힌 곳: 같은 파일을 둔 주소(onnx/model_quantized.onnx, tokenizer.json)
 ```
 
 | 환경 변수 | 기본값 | 뜻 |

@@ -140,4 +140,43 @@ class GarmentRepository {
                         rs.getString("material"), rs.getObject("last_worn_on", LocalDate.class), rs.getDouble("similarity")))
                 .list();
     }
+
+    record Listed(String garmentId, String category, String name, String colorName, String formality, LocalDate lastWorn,
+                  int wearCount) {
+    }
+
+    /** 옷장 목록: 종류 순(겉옷·상의·원피스·하의·신발·기타), 같은 종류는 최근에 본 것부터. */
+    List<Listed> listForUser(UUID userId, String category, int limit) {
+        String cat = category == null ? "" : " AND g.category = :category";
+        var spec = jdbc.sql("""
+                        SELECT g.id, g.category, g.name, g.color_name, g.formality,
+                               max(w.worn_on) AS last_worn_on, count(w.worn_on) AS wear_count
+                          FROM closet.garments g LEFT JOIN closet.wears w ON w.garment_id = g.id
+                         WHERE g.user_id = :userId""" + cat + " " + """
+                         GROUP BY g.id
+                         ORDER BY array_position(ARRAY['outer','top','dress','bottom','shoes','other']::varchar[], g.category),
+                                  g.last_seen_at DESC, g.id
+                         LIMIT :limit""")
+                .param("userId", userId).param("limit", limit);
+        if (category != null) {
+            spec = spec.param("category", category);
+        }
+        return spec.query((rs, i) -> new Listed(rs.getString("id"), rs.getString("category"), rs.getString("name"),
+                rs.getString("color_name"), rs.getString("formality"), rs.getObject("last_worn_on", LocalDate.class),
+                rs.getInt("wear_count"))).list();
+    }
+
+    int countByUser(UUID userId, String category) {
+        if (category == null) {
+            return countByUser(userId);
+        }
+        return jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = :userId AND category = :category")
+                .param("userId", userId).param("category", category).query(Integer.class).single();
+    }
+
+    /** 옷을 지운다. 입은 날(wears)도 FK ON DELETE CASCADE로 함께 지워진다. */
+    int delete(UUID userId, Collection<String> ids) {
+        return jdbc.sql("DELETE FROM closet.garments WHERE user_id = :userId AND id IN (:ids)")
+                .param("userId", userId).param("ids", ids).update();
+    }
 }

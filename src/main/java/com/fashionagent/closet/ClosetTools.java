@@ -74,6 +74,27 @@ public class ClosetTools {
         return run(() -> service.outfits(Ids.userId(userId), from, to, garmentId, limit));
     }
 
+    @Tool(name = "closet_list", description = """
+            옷장에 있는 옷을 돌려줍니다. "내 옷장에 뭐 있어?", "바지 뭐 있지?"(category)에 쓰세요. \
+            겉옷·상의·원피스·하의·신발 순, 같은 종류는 최근에 본 옷부터. total은 전체(또는 그 종류) 벌 수입니다. \
+            지울 옷을 사용자와 확인할 때도 이 목록의 garmentId를 쓰세요.""")
+    public Object closetList(
+            @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
+            @ToolParam(required = false, description = "top | bottom | outer | dress | shoes | other. 없으면 전부") String category,
+            @ToolParam(required = false, description = "최대 개수. 기본 50") Integer limit) {
+        return run(() -> service.list(Ids.userId(userId), category, limit));
+    }
+
+    @Tool(name = "closet_remove", description = """
+            옷장에서 옷을 지웁니다(버린 옷, 잘못 저장된 옷). 되돌릴 수 없고 그 옷의 입은 날 기록도 함께 지워지므로, \
+            어떤 옷인지 사용자에게 읽어 주고 "지울까요?"에 그렇다고 한 뒤에만 부르세요. \
+            남의 옷이나 없는 id가 섞이면 not_found이고 아무것도 지우지 않습니다.""")
+    public Object closetRemove(
+            @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
+            @ToolParam(description = "지울 garmentId 목록. 예: c_17") List<String> garmentIds) {
+        return run(() -> service.remove(Ids.userId(userId), garmentIds));
+    }
+
     private Object run(Supplier<Object> body) {
         try {
             return body.get();

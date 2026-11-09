@@ -285,6 +285,47 @@ public class ClosetService {
         return Map.of("outfits", out);
     }
 
+    /** closet_list. "내 옷장에 뭐 있어?", "바지 뭐 있지?". */
+    public Map<String, Object> list(UUID userId, String category, Integer limit) {
+        String cat = category == null || category.isBlank() ? null : category.trim().toLowerCase();
+        if (cat != null && !Garment.CATEGORIES.contains(cat)) {
+            throw ClosetException.badRequest("category는 top·bottom·outer·dress·shoes·other 중 하나여야 해요.");
+        }
+        int n = limit == null || limit <= 0 ? 50 : Math.min(limit, props.maxClosetSize());
+        var m = new LinkedHashMap<String, Object>();
+        m.put("garments", garments.listForUser(userId, cat, n));
+        m.put("total", garments.countByUser(userId, cat));
+        return m;
+    }
+
+    /**
+     * closet_remove. 버린 옷, 잘못 저장한 옷을 지운다. 남의 옷이나 없는 id가 섞이면 아무것도 지우지 않는다.
+     * 그 옷의 입은 날 기록도 함께 지워져 closet_outfits에서 빠진다.
+     */
+    @Transactional
+    public Map<String, Object> remove(UUID userId, List<String> garmentIds) {
+        if (garmentIds == null || garmentIds.isEmpty()) {
+            throw ClosetException.badRequest("garmentIds가 비어 있어요.");
+        }
+        var ids = new LinkedHashSet<String>();
+        for (String id : garmentIds) {
+            if (id == null || id.isBlank()) {
+                throw ClosetException.badRequest("garmentIds에 빈 값이 있어요.");
+            }
+            ids.add(id.trim());
+        }
+        if (ids.size() > props.maxGarmentsPerSave()) {
+            throw ClosetException.badRequest("한 번에 " + props.maxGarmentsPerSave() + "벌까지 지울 수 있어요.");
+        }
+        var owned = garments.ownedIds(userId, ids);
+        if (owned.size() != ids.size()) {
+            var missing = new ArrayList<>(ids);
+            missing.removeAll(owned);
+            throw ClosetException.notFound("옷장에 없는 옷이에요: " + String.join(", ", missing));
+        }
+        return Map.of("removed", garments.delete(userId, ids));
+    }
+
     private static LocalDate parseDay(String value, String field) {
         try {
             return LocalDate.parse(value.trim().length() > 10 ? value.trim().substring(0, 10) : value.trim());

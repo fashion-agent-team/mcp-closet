@@ -67,7 +67,7 @@ class McpServerTest {
     void toolsList() {
         var tools = client.listTools().tools();
         assertThat(tools).extracting(McpSchema.Tool::name)
-                .containsExactlyInAnyOrder("closet_search", "closet_save", "closet_wear", "closet_outfits");
+                .containsExactlyInAnyOrder("closet_search", "closet_save", "closet_wear", "closet_outfits", "closet_list", "closet_remove");
         var outfits = tools.stream().filter(t -> t.name().equals("closet_outfits")).findFirst().orElseThrow();
         assertThat((List<String>) outfits.inputSchema().get("required")).containsExactly("userId");
         var search = tools.stream().filter(t -> t.name().equals("closet_search")).findFirst().orElseThrow();
@@ -280,6 +280,44 @@ class McpServerTest {
         assertThat(call("closet_outfits", Map.of("userId", UUID.randomUUID().toString())).get("outfits").size()).isZero();
         assertThat(call("closet_outfits", Map.of("userId", user, "from", "2026-11-05", "to", "2026-11-01"))
                 .get("error").get("code").asString()).isEqualTo("bad_request");
+    }
+
+    @Test
+    @DisplayName("옷장 목록(종류 순, 입은 횟수)과 지우기(입은 날도 함께, 남의 옷 섞이면 아무것도 안 지움)")
+    void listAndRemove() {
+        String shirt = saveOne("top", "셔츠", "흰색", "white", "light", "smart");
+        String jeans = saveOne("bottom", "청바지", "연청", "blue", "light", "casual");
+        String jacket = saveOne("outer", "자켓", "남색", "navy", "dark", "smart");
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt, jeans), "date", "2026-11-01"));
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt), "date", "2026-11-02"));
+
+        JsonNode all = call("closet_list", Map.of("userId", user));
+        assertThat(all.get("total").asInt()).isEqualTo(3);
+        var order = new ArrayList<String>();
+        all.get("garments").forEach(g -> order.add(g.get("garmentId").asString()));
+        assertThat(order).containsExactly(jacket, shirt, jeans);   // 겉옷 → 상의 → 하의
+        assertThat(all.get("garments").get(1).get("wearCount").asInt()).isEqualTo(2);
+        assertThat(all.get("garments").get(1).get("lastWorn").asString()).isEqualTo("2026-11-02");
+
+        JsonNode bottoms = call("closet_list", Map.of("userId", user, "category", "bottom"));
+        assertThat(bottoms.get("total").asInt()).isEqualTo(1);
+        assertThat(call("closet_list", Map.of("userId", user, "category", "hat")).get("error").get("code").asString())
+                .isEqualTo("bad_request");
+
+        // 남의 옷이 섞이면 아무것도 지우지 않음
+        String other = UUID.randomUUID().toString();
+        String othersShirt = call("closet_save", Map.of("userId", other, "garments", List.of(
+                garment("g1", "top", "셔츠", "흰색", "white", "light", "smart", null)))).get("saved").get(0).get("garmentId").asString();
+        assertThat(call("closet_remove", Map.of("userId", user, "garmentIds", List.of(jeans, othersShirt)))
+                .get("error").get("code").asString()).isEqualTo("not_found");
+        assertThat(call("closet_list", Map.of("userId", user)).get("total").asInt()).isEqualTo(3);
+
+        assertThat(call("closet_remove", Map.of("userId", user, "garmentIds", List.of(jeans))).get("removed").asInt()).isEqualTo(1);
+        assertThat(call("closet_list", Map.of("userId", user)).get("total").asInt()).isEqualTo(2);
+        // 입은 날 기록에서도 빠짐
+        JsonNode outfit = call("closet_outfits", Map.of("userId", user, "from", "2026-11-01", "to", "2026-11-01"));
+        assertThat(outfit.get("outfits").get(0).get("garments").size()).isEqualTo(1);
+        assertThat(call("closet_list", Map.of("userId", other)).get("total").asInt()).isEqualTo(1);
     }
 
     @Test

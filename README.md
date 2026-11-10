@@ -36,8 +36,16 @@
 - [x] `closet_save`(중복 합치기 포함), `closet_wear`
 - [x] 임베딩 모델(ONNX) 붙이기, `closet_search`
 - [x] 코디 지식 문서 10~20개 쓰기 (17개, `src/main/resources/style_docs/`)
+- [x] PR마다 자동 테스트 (GitHub Actions `CI`)
+- [x] Docker 이미지 자동 빌드·확인·올리기 (`ghcr.io/fashion-agent-team/mcp-closet`)
 - [ ] agent에 붙여 옷 추천 1단계에서 불러 보기
 - [ ] 실제 옷 사진으로 같은 옷 합치기 기준값(0.90) 다시 확인
+
+## 이미지
+
+- `develop`에 합쳐지면 `ghcr.io/fashion-agent-team/mcp-closet:dev`, `main`에 합쳐지면 `:latest`로 자동으로 올라갑니다(GitHub Actions `Docker`). 올리기 전에 pgvector와 함께 띄워 `/actuator/health`가 UP인지, 이미지 안의 모델을 쓰는지 확인합니다. PR에서는 빌드와 확인만 합니다.
+- 받기: `docker pull ghcr.io/fashion-agent-team/mcp-closet:dev` (임베딩 모델 포함, 약 1.07GB, 메모리 1GB 이상 권장)
+- 필요한 환경 변수: `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`
 
 ## 실행
 

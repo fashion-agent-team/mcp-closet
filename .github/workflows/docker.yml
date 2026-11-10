@@ -1,0 +1,97 @@
+# Docker 이미지를 만들고, 띄워서 확인한 뒤 GitHub Container Registry(ghcr.io)에 올립니다.
+# - develop에 합쳐지면 :dev, main에 합쳐지면 :latest (둘 다 커밋별 :sha-xxxxxxx 태그도 같이)
+# - PR에서는 빌드하고 띄워 보기만 하고 올리지 않습니다(Dockerfile이 깨졌는지 확인용).
+# - 띄워 보기: pgvector와 함께 이미지를 띄워 /actuator/health가 UP인지 봅니다.
+#   이미지 안의 모델을 못 읽으면 서버가 꺼지므로(2026-11-06에 실제로 있었던 버그) 여기서 걸립니다.
+# 비밀 값은 필요 없습니다. 레포에 기본으로 있는 GITHUB_TOKEN으로 올립니다.
+name: Docker
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: fashion
+          POSTGRES_PASSWORD: fashion
+          POSTGRES_DB: fashion
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fashion" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 태그 정하기
+        id: tags
+        run: |
+          short="${GITHUB_SHA::7}"
+          case "${GITHUB_REF_NAME}" in
+            develop) echo "tags=${IMAGE}:dev,${IMAGE}:sha-${short}" >> "$GITHUB_OUTPUT" ;;
+            main)    echo "tags=${IMAGE}:latest,${IMAGE}:sha-${short}" >> "$GITHUB_OUTPUT" ;;
+            *)       echo "tags=${IMAGE}:pr-${short}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: 빌드
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mcp-closet:check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 띄워서 확인 (health UP, 모델을 내려받지 않음)
+        run: |
+          docker run -d --name closet --network host \
+            -e SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/fashion \
+            -e SPRING_DATASOURCE_USERNAME=fashion -e SPRING_DATASOURCE_PASSWORD=fashion \
+            mcp-closet:check
+          for i in $(seq 1 60); do
+            if curl -fs localhost:8095/actuator/health | grep -q '"UP"'; then echo "UP (${i}초)"; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' closet)" != "true" ]; then echo "서버가 꺼졌어요"; break; fi
+            sleep 1
+          done
+          docker logs closet 2>&1 | tail -40
+          curl -fs localhost:8095/actuator/health | grep -q '"UP"'
+          if docker logs closet 2>&1 | grep -q "모델 내려받는 중"; then echo "이미지 안의 모델을 쓰지 않고 내려받으려 했어요"; exit 1; fi
+
+      - name: ghcr.io 로그인
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 올리기
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha

@@ -6,7 +6,7 @@
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `ClosetTools` | MCP 도구 4개(`closet_search`, `closet_save`, `closet_wear`, `closet_outfits`). 실패는 `{"error": {"code", "message"}}` |
+| `ClosetTools` | MCP 도구 6개(`closet_search`, `closet_save`, `closet_wear`, `closet_outfits`, `closet_list`, `closet_remove`). 실패는 `{"error": {"code", "message"}}` |
 | `ClosetService` | 도구의 실제 일. 같은 옷 합치기, 입은 날, 검색 후보 고르기 |
 | `GarmentRepository` | `closet.garments`, `closet.wears` (JdbcClient, SQL은 data-model.md 3절) |
 | `CandidateFilter` | `occasion`·`apparentTemperature`로 맞지 않는 옷 빼기, 최근 입은 옷 감점 |
@@ -92,6 +92,10 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 
 새 표 없이 `wears`만 씁니다. 같은 날 `closet_wear`로 기록한 옷 = 그날의 조합. 최근 날부터 `limit`개(기본 5, 최대 30), 기간 기본 90일. `garmentId`를 주면 그 옷을 입은 날만. 한계: 하루에 두 번 갈아입으면 한 벌로 묶이고, 그날의 자리(면접 등)는 저장하지 않으므로 agent가 `schedule_list`로 날짜를 찾아 넘깁니다.
 
+## closet_list, closet_remove
+
+시각장애인 사용자는 화면으로 옷장을 볼 수 없어서 "내 옷장에 뭐 있어?"를 말로 들어야 하고, 버린 옷이나 잘못 합쳐진 옷을 정리할 방법이 필요해서 넣었습니다. 지우기는 소프트 삭제가 아니라 실제로 지웁니다(표를 바꾸지 않으려고). 그 옷의 입은 날도 FK `ON DELETE CASCADE`로 함께 지워져 예전 조합에서 빠집니다. 되돌릴 수 없으므로 agent가 옷을 읽어 주고 확인받은 뒤 부르게 도구 설명에 적었습니다.
+
 ## closet_wear
 
 `garmentIds`가 모두 이 사람 옷이어야 기록합니다. 하나라도 없거나 남의 옷이면 `not_found`이고 아무것도 기록하지 않습니다(agent는 closet_save가 준 id만 넘기므로 섞이면 버그). 같은 옷 같은 날은 한 번만(`ON CONFLICT DO NOTHING`). `date`가 없으면 서울 기준 오늘, 내일보다 뒤면 `bad_request`.
@@ -117,4 +121,4 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 
 - `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.
 - `E5OnnxEmbeddingModelTest`: `CLOSET_E5_DIR`(model.onnx, tokenizer.json)이 있을 때만.
-- 나머지는 순수 단위 테스트. 모두 25개(실제 e5 3개 포함).
+- 나머지는 순수 단위 테스트. 모두 26개(실제 e5 3개 포함).

@@ -18,6 +18,8 @@
 | `closet_save` | 옷 추천을 마칠 때 본 옷을 기록. 같은 옷이면 합침(임베딩 유사도 + 종류·색·이름, 톤·무늬가 다르거나 한 번에 온 옷끼리는 안 합침, `forceNewIds`) |
 | `closet_wear` | 입은 날 기록 |
 | `closet_outfits` | 예전에 입은 조합(같은 날 입은 옷을 한 벌로). "지난번 면접 때 뭐 입었지?" |
+| `closet_list` | 옷장 목록(종류 순, 입은 횟수). "내 옷장에 뭐 있어?" |
+| `closet_remove` | 옷 지우기(버린 옷, 잘못 저장된 옷). 입은 날 기록도 함께 지움 |
 
 입출력 JSON은 [MCP 도구 입출력](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/mcp-tools.md)를 그대로 따릅니다.
 

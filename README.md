@@ -15,7 +15,7 @@
 | 도구 | 하는 일 |
 | --- | --- |
 | `closet_search` | RAG의 검색 단계. 상황(일정·날씨 문장)에 맞는 내 옷 후보 + 코디 지식 문서. 생성(추천 문장)은 agent의 GPT가 함 |
-| `closet_save` | 옷 추천을 마칠 때 본 옷을 기록. 같은 옷이면 합침(임베딩 유사도 + 종류·색) |
+| `closet_save` | 옷 추천을 마칠 때 본 옷을 기록. 같은 옷이면 합침(임베딩 유사도 + 종류·색·이름, 톤·무늬가 다르거나 한 번에 온 옷끼리는 안 합침, `forceNewIds`) |
 | `closet_wear` | 입은 날 기록 |
 | `closet_outfits` | 예전에 입은 조합(같은 날 입은 옷을 한 벌로). "지난번 면접 때 뭐 입었지?" |
 
@@ -45,7 +45,8 @@ SPRING_DATASOURCE_PASSWORD=… ./gradlew bootRun          # 처음 뜰 때 e5 �
 CLOSET_EMBEDDING_PROVIDER=hash ./gradlew bootRun        # 모델 없이 띄우기(개발용, 검색 품질 없음)
 ./gradlew test                                          # Docker 필요(Testcontainers pgvector). 없으면 DB 테스트는 건너뜀
 CLOSET_E5_DIR=/path/to/e5 ./gradlew test                # model.onnx·tokenizer.json이 있으면 실제 e5 테스트도 돎
-docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # 모델을 이미지에 넣음
+docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # 모델을 이미지에 넣음(Hugging Face에서 받고 sha256 검사)
+docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Hugging Face가 막힌 곳: 같은 파일을 둔 주소(onnx/model_quantized.onnx, tokenizer.json)
 ```
 
 | 환경 변수 | 기본값 | 뜻 |

@@ -142,6 +142,31 @@ class McpServerTest {
     }
 
     @Test
+    @DisplayName("같은 색 니트 두 벌: 한 번에 넘기면 두 벌, forceNewIds면 비슷해도 새 옷")
+    void twoSameColorKnits() {
+        var knit = garment("g1", "top", "니트", "차콜 그레이", "gray", "dark", "smart", "니트 같음");
+        var knit2 = garment("g2", "top", "니트", "차콜 그레이", "gray", "dark", "smart", "니트 같음");
+        JsonNode both = call("closet_save", Map.of("userId", user, "garments", List.of(knit, knit2)));
+        assertThat(both.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+        assertThat(both.get("saved").get(1).get("isNew").asBoolean()).isTrue();
+        String a = both.get("saved").get(0).get("garmentId").asString();
+        String b = both.get("saved").get(1).get("garmentId").asString();
+        assertThat(a).isNotEqualTo(b);
+
+        // 다음에 두 벌을 같이 다시 보면 각각 하나씩 합친다(한 옷에 두 벌을 몰지 않음)
+        JsonNode again = call("closet_save", Map.of("userId", user, "garments", List.of(knit, knit2)));
+        assertThat(List.of(again.get("saved").get(0).get("garmentId").asString(), again.get("saved").get(1).get("garmentId").asString()))
+                .containsExactlyInAnyOrder(a, b);
+
+        // 사용자가 "다른 옷이에요" → forceNewIds
+        var third = garment("g3", "top", "니트", "차콜 그레이", "gray", "dark", "smart", "니트 같음");
+        JsonNode forced = call("closet_save", Map.of("userId", user, "garments", List.of(third), "forceNewIds", List.of("g3")));
+        assertThat(forced.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = CAST(:u AS uuid)").param("u", user)
+                .query(Integer.class).single()).isEqualTo(3);
+    }
+
+    @Test
     @DisplayName("이상한 값은 고쳐 저장하고, 종류가 없으면 bad_request")
     void saveValidation() {
         var odd = garment("g1", "top", " ", "", "rainbow", "very", "fancy", null);

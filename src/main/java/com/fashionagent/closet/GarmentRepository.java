@@ -18,18 +18,20 @@ class GarmentRepository {
         this.jdbc = jdbc;
     }
 
-    record Match(String id, String name, double similarity) {
+    /** pattern은 description(jsonb)에서 꺼낸 clothes_inspect 값(없으면 null). */
+    record Match(String id, String name, String tone, String pattern, double similarity) {
     }
 
     /** 같은 옷 후보: 내 옷 중 종류·색 계열이 같은 것을 가까운 순으로 몇 개. */
     List<Match> nearestSame(UUID userId, String category, String colorFamily, float[] q, int limit) {
         return jdbc.sql("""
-                        SELECT id, name, 1 - (embedding <=> CAST(:q AS public.vector)) AS similarity FROM closet.garments
+                        SELECT id, name, tone, description ->> 'pattern' AS pattern, 1 - (embedding <=> CAST(:q AS public.vector)) AS similarity FROM closet.garments
                          WHERE user_id = :userId AND category = :category AND color_family = :colorFamily AND embedding IS NOT NULL
                          ORDER BY embedding <=> CAST(:q AS public.vector) LIMIT :limit""")
                 .param("q", Vectors.literal(q)).param("userId", userId)
                 .param("category", category).param("colorFamily", colorFamily).param("limit", limit)
-                .query((rs, i) -> new Match(rs.getString("id"), rs.getString("name"), rs.getDouble("similarity")))
+                .query((rs, i) -> new Match(rs.getString("id"), rs.getString("name"), rs.getString("tone"),
+                        rs.getString("pattern"), rs.getDouble("similarity")))
                 .list();
     }
 

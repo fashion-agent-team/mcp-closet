@@ -36,6 +36,11 @@ public record Garment(
     public record Box(Double x, Double y, Double w, Double h) {
     }
 
+    Garment withPattern(String p) {
+        return new Garment(id, category, name, colorName, colorFamily, tone, p, material, notes, formality, defects, box,
+                position, confidence);
+    }
+
     static final Set<String> CATEGORIES = Set.of("top", "bottom", "outer", "dress", "shoes", "other");
     static final Set<String> COLOR_FAMILIES = Set.of("black", "white", "gray", "navy", "beige", "brown", "khaki",
             "blue", "red", "pink", "orange", "yellow", "green", "purple", "unknown");

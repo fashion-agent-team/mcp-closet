@@ -11,8 +11,15 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 ENV TZ=Asia/Seoul
 # 임베딩 모델(multilingual-e5-small, 양자화 ONNX 약 118MB)을 이미지에 넣어 뜰 때 내려받지 않게 한다.
-ADD --chmod=644 https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model_quantized.onnx /app/models/model.onnx
-ADD --chmod=644 https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/tokenizer.json /app/models/tokenizer.json
+# MODEL_BASE_URL: Hugging Face가 막힌 곳에서는 같은 파일을 둔 다른 주소(사내 저장소 등)로 바꿔 빌드한다.
+# checksum이 Hugging Face 파일과 같아야만 빌드되므로 어디서 받아도 같은 모델이다.
+ARG MODEL_BASE_URL=https://huggingface.co/Xenova/multilingual-e5-small/resolve/main
+# 폴더를 먼저 만든다. ADD --chmod가 폴더를 만들면 폴더도 644(들어갈 수 없음)가 되어 USER 1000이 모델을 못 읽는다.
+RUN mkdir -m 755 /app/models
+ADD --chmod=644 --checksum=sha256:f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193 \
+    ${MODEL_BASE_URL}/onnx/model_quantized.onnx /app/models/model.onnx
+ADD --chmod=644 --checksum=sha256:0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39 \
+    ${MODEL_BASE_URL}/tokenizer.json /app/models/tokenizer.json
 ENV CLOSET_MODEL_DIR=/app/models \
     DJL_CACHE_DIR=/tmp/djl \
     DJL_OFFLINE=true

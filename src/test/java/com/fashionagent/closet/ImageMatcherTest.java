@@ -69,6 +69,22 @@ class ImageMatcherTest {
     }
 
     @Test
+    @DisplayName("기본 보정 행렬(jar 안, CC0로 만듦)을 읽고 기준 0.68을 쓴다. 같은 벡터는 1, 길이 1 유지")
+    void defaultAdapter() {
+        var m = new ImageMatcher(new ClosetProperties(0.90, 20, 500, 8, 20, 3,
+                new ClosetProperties.Embedding("hash", "", "", "models", 256, java.time.Duration.ofMinutes(1)),
+                new ClosetProperties.Image(0.89, "classpath:image-adapter/fsiglip-cc0-aug.bin", 0.68, 768, 10)));
+        assertThat(m.adapted()).isTrue();
+        assertThat(m.threshold()).isEqualTo(0.68);
+        var v = new ArrayList<Double>();
+        for (int i = 0; i < 768; i++) {
+            v.add(Math.sin(i * 0.37));
+        }
+        float[] k = m.key(m.accept(v));
+        assertThat(Vectors.dot(k, k)).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-5));
+    }
+
+    @Test
     @DisplayName("보정 행렬 크기가 틀리면 서버가 뜨지 않는다(조용히 기준이 어긋나지 않게)")
     void badAdapter(@TempDir Path dir) throws Exception {
         Path f = dir.resolve("bad.bin");

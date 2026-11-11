@@ -38,8 +38,9 @@ closet:
   same-garment-threshold: ${CLOSET_SAME_GARMENT_THRESHOLD:0.90}
   image:
     threshold: ${CLOSET_IMAGE_THRESHOLD:0.89}
-    adapter-path: ${CLOSET_IMAGE_ADAPTER:}
-    adapter-threshold: ${CLOSET_IMAGE_ADAPTER_THRESHOLD:0.43}
+    # 기본: CC0 옷 사진으로 만든 보정 행렬(jar 안). 끄려면 CLOSET_IMAGE_ADAPTER= (빈 값), 그때 기준은 threshold(0.89)
+    adapter-path: ${CLOSET_IMAGE_ADAPTER:classpath:image-adapter/fsiglip-cc0-aug.bin}
+    adapter-threshold: ${CLOSET_IMAGE_ADAPTER_THRESHOLD:0.68}
   embedding:
     provider: ${CLOSET_EMBEDDING_PROVIDER:onnx}
     model-uri: ${CLOSET_EMBEDDING_MODEL_URI:https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model_quantized.onnx}

@@ -29,7 +29,7 @@ import tools.jackson.databind.json.JsonMapper;
  * 임베딩은 모델 없이 도는 hash를 쓴다(뜻은 모르지만 같은 글은 같은 벡터). Docker가 없으면 건너뛴다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"closet.embedding.provider=hash"})
+        properties = {"closet.embedding.provider=hash", "closet.image.adapter-path="})
 @Import(TestDb.class)
 @Testcontainers(disabledWithoutDocker = true)
 class McpServerTest {

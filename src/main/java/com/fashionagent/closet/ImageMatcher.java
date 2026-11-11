@@ -113,9 +113,9 @@ public class ImageMatcher {
         if (path == null || path.isBlank()) {
             return null;
         }
-        Path file = Path.of(path.trim());
+        String where = path.trim();
         long want = 4L * dim * (dim + 1);
-        try (InputStream in = Files.newInputStream(file)) {
+        try (InputStream in = open(where)) {
             byte[] bytes = in.readAllBytes();
             if (bytes.length != want) {
                 throw new IllegalStateException("옷 사진 보정 행렬 크기가 달라요: " + bytes.length + "바이트, " + want + "바이트여야 함");
@@ -127,7 +127,20 @@ public class ImageMatcher {
             }
             return out;
         } catch (IOException e) {
-            throw new IllegalStateException("옷 사진 보정 행렬을 읽지 못했어요: " + file, e);
+            throw new IllegalStateException("옷 사진 보정 행렬을 읽지 못했어요: " + where, e);
         }
+    }
+
+    /** classpath:로 시작하면 jar 안(기본 보정 행렬), 아니면 파일 경로. */
+    private static InputStream open(String where) throws IOException {
+        if (where.startsWith("classpath:")) {
+            String name = where.substring("classpath:".length()).replaceFirst("^/", "");
+            InputStream in = ImageMatcher.class.getClassLoader().getResourceAsStream(name);
+            if (in == null) {
+                throw new IOException("없음: " + where);
+            }
+            return in;
+        }
+        return Files.newInputStream(Path.of(where));
     }
 }

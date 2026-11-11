@@ -48,15 +48,15 @@ public record ClosetProperties(
      * 옷 사진 벡터 설정. 기준값은 DeepFashion 옷 600벌로 "옷 30벌 옷장에 새 옷이 잘못 합쳐지는 비율 5%"에 맞춘 값.
      *
      * @param threshold         보정 행렬 없이 비교할 때 같은 옷으로 보는 코사인 유사도
-     * @param adapterPath       보정 행렬(WCCN) 파일. 비면 쓰지 않음. 비상업 데이터로 만들어 레포·이미지에 넣지 않는다
-     * @param adapterThreshold  보정 행렬을 쓸 때의 기준(보정 후 유사도는 크기가 달라서 따로 둔다)
+     * @param adapterPath       보정 행렬(WCCN). 기본은 jar 안의 CC0 옷 사진으로 만든 것(classpath:). 파일 경로도 됨. 비우면 쓰지 않음
+     * @param adapterThreshold  보정 행렬을 쓸 때의 기준(보정 후 유사도는 크기가 달라서 따로 둔다). 행렬을 바꾸면 기준도 함께 바꾼다
      * @param dimensions        벡터 길이(DB 열 vector(768)과 같아야 함)
      * @param maxCount          평균에 넣는 사진 수 상한. 넘으면 새 사진 비중을 1/maxCount로 고정(옷이 바래도 따라감)
      */
     public record Image(
             @DefaultValue("0.89") double threshold,
-            @DefaultValue("") String adapterPath,
-            @DefaultValue("0.43") double adapterThreshold,
+            @DefaultValue("classpath:image-adapter/fsiglip-cc0-aug.bin") String adapterPath,
+            @DefaultValue("0.68") double adapterThreshold,
             @DefaultValue("768") int dimensions,
             @DefaultValue("10") int maxCount) {
     }

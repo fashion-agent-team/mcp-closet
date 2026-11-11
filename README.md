@@ -40,7 +40,8 @@
 - [x] Docker 이미지 자동 빌드·확인·올리기 (`ghcr.io/fashion-agent-team/mcp-closet`)
 - [ ] agent에 붙여 옷 추천 1단계에서 불러 보기
 - [x] 옷 사진 벡터로 같은 옷 판단 (mcp-clothes-state 이슈 #15)
-- [ ] 팀원 폰으로 찍은 실제 옷 사진으로 사진 기준값(0.89 / 보정 0.43) 다시 확인
+- [x] 누구나 써도 되는 데이터(CC0)로 만든 사진 보정 행렬을 기본으로 넣기
+- [ ] 팀원 폰으로 찍은 실제 옷 사진으로 사진 기준값(기본 0.68) 다시 확인
 
 ## 이미지
 
@@ -67,9 +68,9 @@ docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Huggi
 | `CLOSET_EMBEDDING_MODEL_URI` / `CLOSET_EMBEDDING_TOKENIZER_URI` | Hugging Face `Xenova/multilingual-e5-small` 양자화 ONNX | `https:`, `file:`, `classpath:` |
 | `CLOSET_MODEL_DIR` | `models` | 내려받은 모델 둘 곳 |
 | `CLOSET_SAME_GARMENT_THRESHOLD` | `0.90` | 사진 벡터가 없을 때 같은 옷으로 합치는 글 유사도 기준 |
-| `CLOSET_IMAGE_THRESHOLD` | `0.89` | 사진 벡터로 같은 옷이라고 보는 코사인 유사도 |
-| `CLOSET_IMAGE_ADAPTER` | (없음) | 사진 보정 행렬(WCCN) 파일. 있으면 더 정확함. 비상업 데이터로 만들어 레포·이미지에 넣지 않음(아래) |
-| `CLOSET_IMAGE_ADAPTER_THRESHOLD` | `0.43` | 보정 행렬을 쓸 때의 기준 |
+| `CLOSET_IMAGE_ADAPTER` | jar 안 CC0 보정 행렬 | 사진 보정 행렬(WCCN). 파일 경로를 주면 그것을, 빈 값이면 보정 없이 |
+| `CLOSET_IMAGE_ADAPTER_THRESHOLD` | `0.68` | 보정 행렬을 쓸 때 같은 옷이라고 보는 유사도(행렬마다 다름, docs/DEVELOPMENT.md) |
+| `CLOSET_IMAGE_THRESHOLD` | `0.89` | 보정 없이 쓸 때의 기준 |
 
 API 키는 필요 없습니다(임베딩은 서버 CPU에서 돌고, GPT는 agent가 부릅니다). 만든 방식과 잰 숫자는 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)에 있습니다.
 

@@ -1,6 +1,7 @@
 package com.fashionagent.closet;
 
 import com.fashionagent.closet.embedding.E5;
+import com.fashionagent.closet.embedding.ImageTextModel;
 import com.fashionagent.closet.style.StyleKnowledge;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -29,17 +30,19 @@ public class ClosetService {
     private final GarmentRepository garments;
     private final ImageMatcher images;
     private final ImageLabels labels;
+    private final ImageTextModel imageText;
     private final EmbeddingModel embedding;
     private final StyleKnowledge style;
     private final ClosetProperties props;
     private final JsonMapper json;
     private final Clock clock;
 
-    public ClosetService(GarmentRepository garments, ImageMatcher images, ImageLabels labels, EmbeddingModel embedding,
-                         StyleKnowledge style, ClosetProperties props, JsonMapper json, Clock clock) {
+    public ClosetService(GarmentRepository garments, ImageMatcher images, ImageLabels labels, ImageTextModel imageText,
+                         EmbeddingModel embedding, StyleKnowledge style, ClosetProperties props, JsonMapper json, Clock clock) {
         this.garments = garments;
         this.images = images;
         this.labels = labels;
+        this.imageText = imageText;
         this.embedding = embedding;
         this.style = style;
         this.props = props;
@@ -256,6 +259,15 @@ public class ClosetService {
     /** closet_search. RAG의 검색 단계: 내 옷 후보 + 코디 지식 조각. 추천 문장은 agent의 GPT가 만든다. */
     public Map<String, Object> search(UUID userId, String situation, String occasion, Double apparentTemperature,
                                       List<String> excludeGarmentIds, Integer limit) {
+        return search(userId, situation, occasion, apparentTemperature, excludeGarmentIds, limit, null);
+    }
+
+    /**
+     * imageQuery(영어, 예: "warm winter clothes")가 있고 글 모델이 켜져 있으면 옷 사진 벡터와도 비교해
+     * e5 점수에 weight × 사진↔글 유사도를 더한다. 사진 벡터가 없는 옷은 있는 옷들의 평균을 더해 손해 보지 않게 한다.
+     */
+    public Map<String, Object> search(UUID userId, String situation, String occasion, Double apparentTemperature,
+                                      List<String> excludeGarmentIds, Integer limit, String imageQuery) {
         if (situation == null || situation.isBlank()) {
             throw ClosetException.badRequest("situation이 없어요.");
         }
@@ -284,13 +296,33 @@ public class ClosetService {
             return result(List.of(), notes, true);
         }
         LocalDate today = LocalDate.now(clock.withZone(SEOUL));
+        Map<String, Double> imageSim = imageSimilarities(userId, imageQuery);
+        double w = props.image().text().weight();
+        double fill = imageSim.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
         var ranked = garments.rankedForUser(userId, q, exclude).stream()
                 .filter(g -> !CandidateFilter.excluded(g, occ, apparentTemperature))
-                .map(g -> g.withSimilarity(g.similarity() + CandidateFilter.formalityBonus(occ, g.formality())
+                .map(g -> g.withSimilarity(g.similarity() + (imageSim.isEmpty() ? 0 : w * imageSim.getOrDefault(g.id(), fill))
+                        + CandidateFilter.formalityBonus(occ, g.formality())
                         - CandidateFilter.recencyPenalty(g.lastWorn(), today)))
                 .sorted(java.util.Comparator.comparingDouble(GarmentRepository.Candidate::similarity).reversed())
                 .toList();
         return result(diversify(ranked, n), notes, false);
+    }
+
+    private Map<String, Double> imageSimilarities(UUID userId, String imageQuery) {
+        if (imageQuery == null || imageQuery.isBlank() || !imageText.enabled()) {
+            return Map.of();
+        }
+        if (imageQuery.length() > 200) {
+            throw ClosetException.badRequest("imageQuery는 200자 이내여야 해요.");
+        }
+        try {
+            return garments.imageSimilarities(userId, imageText.embed("a photo of " + imageQuery.trim()), imageText.model());
+        } catch (RuntimeException e) {
+            // 사진↔글은 덤이라 실패해도 글 검색 결과는 돌려준다
+            log.warn("imageQuery 임베딩 실패: {}", e.toString());
+            return Map.of();
+        }
     }
 
     /** 비 문서는 상황 문장에 비 이야기가 있을 때만 넣는다(아니면 어느 검색에나 끼어서). */

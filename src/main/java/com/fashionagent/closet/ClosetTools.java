@@ -29,15 +29,17 @@ public class ClosetTools {
             옷 추천 1단계에서 부르고, 추천은 candidates 안의 옷과 styleNotes를 근거로만 하세요. \
             empty가 true면 옷장이 비어 있으니 "옷 확인을 몇 번 하면 옷장이 채워져요"라고 안내하세요. \
             occasion·apparentTemperature를 주면 그 자리·날씨에 맞지 않는 옷(예: 면접에 운동복, 더운 날 겉옷)은 뺍니다. \
-            어제·그제 입은 옷은 점수가 조금 낮아집니다(lastWorn으로 언제 입었는지 알 수 있음).""")
+            어제·그제 입은 옷은 점수가 조금 낮아집니다(lastWorn으로 언제 입었는지 알 수 있음). \
+            imageQuery에 찾는 옷을 짧은 영어로 함께 주면(예: warm winter clothes, formal office attire for a job interview) 옷 사진으로도 찾아 더 정확합니다.""")
     public Object closetSearch(
             @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
             @ToolParam(description = "일정·날씨로 만든 상황 문장. 예: 오늘 오전 면접, 체감 9도") String situation,
             @ToolParam(required = false, description = "mourning | wedding | formal | business | active | casual") String occasion,
             @ToolParam(required = false, description = "체감 온도(섭씨). 예: 9.5") Double apparentTemperature,
             @ToolParam(required = false, description = "후보에서 뺄 garmentId 목록. 예: 어제 입은 옷") List<String> excludeGarmentIds,
-            @ToolParam(required = false, description = "후보 최대 개수. 기본 8, 최대 20") Integer limit) {
-        return run(() -> service.search(Ids.userId(userId), situation, occasion, apparentTemperature, excludeGarmentIds, limit));
+            @ToolParam(required = false, description = "후보 최대 개수. 기본 8, 최대 20") Integer limit,
+            @ToolParam(required = false, description = "찾는 옷을 짧은 영어로(200자 이내). 예: jeans, striped clothes, light summer clothes") String imageQuery) {
+        return run(() -> service.search(Ids.userId(userId), situation, occasion, apparentTemperature, excludeGarmentIds, limit, imageQuery));
     }
 
     @Tool(name = "closet_save", description = """

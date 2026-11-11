@@ -132,7 +132,23 @@ clothes_inspect의 이름은 "티셔츠·바지·니트"처럼 굵고, 격식은
 
 상황 질문은 4개×4명이라 흔들림이 큽니다. 줄어든 것은 주로 면접(30→10%)인데, 여자 블라우스 상당수가 "민소매"로 바뀌며 격식 casual로 남아서입니다. clothes_inspect 이름을 글에 함께 넣어 봤지만 45%·27%로 거의 같아 넣지 않았습니다.
 
-다음: 상황 질문은 사진 벡터와 영어 글을 직접 비교하는 것이 더 낫습니다(Python 벤치마크에서 상황 28→52%). 서버에 FashionSigLIP 글 모델을 넣고 agent가 영어 검색어를 함께 주는 방식으로 이어서 봅니다.
+## 영어 검색어로 사진 벡터 찾기 (closet_search `imageQuery`, 2026-11-11)
+
+agent가 `imageQuery`에 찾는 옷을 짧은 영어로 주면(예: `warm winter clothes`) FashionSigLIP 글 모델로 벡터를 만들어 옷 사진 벡터(같은 모델)와 코사인을 잽니다. 점수 = e5 점수 + 1.5 × 사진↔글 유사도. 사진 벡터가 없는 옷은 있는 옷들의 평균을 더해서 손해 보지 않게 합니다. 글 모델이 꺼져 있거나 실패하면 `imageQuery`를 무시하고 예전처럼 찾습니다.
+
+- 글 모델: `text_model.onnx`를 int8로 줄인 것(~111MB, `tools/image-labels/quantize_text.py`). jar에 넣지 않고 `CLOSET_IMAGE_TEXT_MODEL_URI`, `CLOSET_IMAGE_TEXT_TOKENIZER_URI`로 줍니다(비우면 꺼짐, 기본은 꺼짐).
+- 전처리: open_clip SigLIP 방식(문장부호 빼기·소문자 → T5 sentencepiece, 64토큰, 빈칸 1). 앞에 `a photo of `를 붙입니다. Java 토큰 id·벡터가 Python과 같은지 `ImageTextModelTest`(FSIGLIP_TEXT_DIR)로 확인.
+- 가중치 1.5: Python 벤치마크에서 0.5·1·1.5·2·3 중 전체 정답률이 가장 높았습니다(1.5~2가 비슷).
+- 속도: closet_search 18ms → 64ms(글 모델 한 번), 서버 메모리 약 1.1GB.
+
+실제 두 서버로 잰 값(위와 같은 옷장·질문, 위 5개 중 맞은 비율):
+
+| 질문 | 예전 | 사진으로 이름 고르기 | + imageQuery |
+| --- | --- | --- | --- |
+| 옷 이름·무늬 15개 | 20% | 44% | 57% |
+| 상황 4개 | 36% | 28% | 37% |
+
+종류별로 돌아가며 고르기(diversify) 때문에 "원피스"를 찾아도 상의·하의가 섞여 나와서 이 표의 위 5개 정답률은 그만큼 낮게 나옵니다.
 
 ## closet_search
 

@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -141,6 +142,17 @@ class GarmentRepository {
         Candidate withSimilarity(double s) {
             return new Candidate(id, category, name, colorName, colorFamily, tone, formality, material, lastWorn, s);
         }
+    }
+
+    /** 사진 벡터가 있는 내 옷마다 영어 검색어 벡터와의 코사인 유사도(같은 모델 벡터만). */
+    Map<String, Double> imageSimilarities(UUID userId, float[] q, String model) {
+        var out = new java.util.HashMap<String, Double>();
+        jdbc.sql("""
+                        SELECT id, 1 - (image_embedding <=> CAST(:q AS public.vector)) AS s FROM closet.garments
+                         WHERE user_id = :userId AND image_model = :model AND image_embedding IS NOT NULL""")
+                .param("q", Vectors.literal(q)).param("userId", userId).param("model", model)
+                .query((rs, i) -> out.put(rs.getString("id"), rs.getDouble("s"))).list();
+        return out;
     }
 
     /** 내 옷 전부를 질문과 가까운 순으로(한 사람 100벌 안팎이라 정확한 거리로 다 훑는다, research R3). */

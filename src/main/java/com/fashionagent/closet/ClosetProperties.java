@@ -52,12 +52,29 @@ public record ClosetProperties(
      * @param adapterThreshold  보정 행렬을 쓸 때의 기준(보정 후 유사도는 크기가 달라서 따로 둔다). 행렬을 바꾸면 기준도 함께 바꾼다
      * @param dimensions        벡터 길이(DB 열 vector(768)과 같아야 함)
      * @param maxCount          평균에 넣는 사진 수 상한. 넘으면 새 사진 비중을 1/maxCount로 고정(옷이 바래도 따라감)
+     * @param text              closet_search의 imageQuery(영어)를 사진 벡터와 비교하는 글 모델. 비우면 쓰지 않음
      */
     public record Image(
             @DefaultValue("0.89") double threshold,
             @DefaultValue("classpath:image-adapter/fsiglip-cc0-aug.bin") String adapterPath,
             @DefaultValue("0.68") double adapterThreshold,
             @DefaultValue("768") int dimensions,
-            @DefaultValue("10") int maxCount) {
+            @DefaultValue("10") int maxCount,
+            @DefaultValue Text text) {
+    }
+
+    /**
+     * FashionSigLIP 글 모델(int8 ONNX, 입력 input_ids[1,64], 출력 text_embeds[1,768]).
+     *
+     * @param modelUri     ONNX 파일(file:·classpath:·http(s)). 비우면 imageQuery를 무시
+     * @param tokenizerUri tokenizer.json(T5 sentencepiece)
+     * @param model        이 글 모델과 짝인 사진 벡터 이름(image_model 열과 같아야 비교)
+     * @param weight       글 점수(e5)에 더하는 사진↔글 유사도의 가중치. DeepFashion 600벌 벤치마크에서 1.5가 가장 좋았다
+     */
+    public record Text(
+            @DefaultValue("") String modelUri,
+            @DefaultValue("") String tokenizerUri,
+            @DefaultValue("marqo-fashionSigLIP") String model,
+            @DefaultValue("1.5") double weight) {
     }
 }

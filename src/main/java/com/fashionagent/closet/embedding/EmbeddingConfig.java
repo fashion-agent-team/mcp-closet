@@ -43,7 +43,7 @@ public class EmbeddingConfig {
     }
 
     /** http(s)는 처음 한 번만 내려받고(이미 있으면 그대로), file:·classpath:는 그 파일을 쓴다. */
-    static Path fetch(String uri, Path target, ClosetProperties.Embedding e) throws IOException, InterruptedException {
+    public static Path fetch(String uri, Path target, ClosetProperties.Embedding e) throws IOException, InterruptedException {
         if (!uri.startsWith("http://") && !uri.startsWith("https://")) {
             var res = new DefaultResourceLoader().getResource(uri);
             if (res.isFile()) {

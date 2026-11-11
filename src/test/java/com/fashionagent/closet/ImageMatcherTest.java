@@ -18,7 +18,7 @@ class ImageMatcherTest {
     private static ClosetProperties props(int dim, String adapter) {
         return new ClosetProperties(0.90, 20, 500, 8, 20, 3,
                 new ClosetProperties.Embedding("hash", "", "", "models", 256, java.time.Duration.ofMinutes(1)),
-                new ClosetProperties.Image(0.89, adapter, 0.43, dim, 10));
+                new ClosetProperties.Image(0.89, adapter, 0.43, dim, 10, new ClosetProperties.Text("", "", "marqo-fashionSigLIP", 1.5)));
     }
 
     @Test
@@ -73,7 +73,8 @@ class ImageMatcherTest {
     void defaultAdapter() {
         var m = new ImageMatcher(new ClosetProperties(0.90, 20, 500, 8, 20, 3,
                 new ClosetProperties.Embedding("hash", "", "", "models", 256, java.time.Duration.ofMinutes(1)),
-                new ClosetProperties.Image(0.89, "classpath:image-adapter/fsiglip-cc0-aug.bin", 0.68, 768, 10)));
+                new ClosetProperties.Image(0.89, "classpath:image-adapter/fsiglip-cc0-aug.bin", 0.68, 768, 10,
+                        new ClosetProperties.Text("", "", "marqo-fashionSigLIP", 1.5))));
         assertThat(m.adapted()).isTrue();
         assertThat(m.threshold()).isEqualTo(0.68);
         var v = new ArrayList<Double>();

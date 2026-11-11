@@ -72,6 +72,7 @@ class McpServerTest {
         assertThat((List<String>) outfits.inputSchema().get("required")).containsExactly("userId");
         var search = tools.stream().filter(t -> t.name().equals("closet_search")).findFirst().orElseThrow();
         assertThat((List<String>) search.inputSchema().get("required")).containsExactlyInAnyOrder("userId", "situation");
+        assertThat(((Map<String, Object>) search.inputSchema().get("properties")).keySet()).contains("imageQuery");
         var save = tools.stream().filter(t -> t.name().equals("closet_save")).findFirst().orElseThrow();
         assertThat((List<String>) save.inputSchema().get("required")).containsExactlyInAnyOrder("userId", "garments");
     }
@@ -97,7 +98,9 @@ class McpServerTest {
         assertThat(sources).allMatch(s -> List.of("style_docs/interview.md", "style_docs/weather-9to12.md",
                 "style_docs/color-basics.md", "style_docs/color-combos.md", "style_docs/pattern-material.md").contains(s));
         // 비 이야기가 있을 때만 비 문서
-        JsonNode rainy = call("closet_search", Map.of("userId", user, "situation", "오후에 비 와요, 출근", "occasion", "business"));
+        // imageQuery는 글 모델이 꺼져 있으면 무시하고 그대로 찾는다
+        JsonNode rainy = call("closet_search", Map.of("userId", user, "situation", "오후에 비 와요, 출근", "occasion", "business",
+                "imageQuery", "office clothes for a rainy day"));
         var rainSources = new ArrayList<String>();
         rainy.get("styleNotes").forEach(n -> rainSources.add(n.get("source").asString()));
         assertThat(rainSources).contains("style_docs/rain.md");

@@ -11,7 +11,9 @@
 | `GarmentRepository` | `closet.garments`, `closet.wears` (JdbcClient, SQL은 data-model.md 3절) |
 | `CandidateFilter` | `occasion`·`apparentTemperature`로 맞지 않는 옷 빼기, 최근 입은 옷 감점 |
 | `GarmentNames` | 같은 옷인지 볼 때 이름 비교(니트=스웨터, 자켓=재킷 …) |
-| `SameGarment` | 같은 옷 후보라도 톤(light↔dark)·무늬가 다르면 다른 옷 |
+| `SameGarment` | (사진 벡터가 없을 때) 같은 옷 후보라도 톤(light↔dark)·무늬가 다르면 다른 옷 |
+| `ImageMatcher` | 옷 사진 벡터 두 개가 같은 옷인지(코사인, 보정 행렬이 있으면 바꾼 뒤), 평균 갱신 |
+| `ImageLabels` | 옷 사진 벡터로 이름·무늬·격식 고르기(zero-shot, 미리 계산한 글 벡터 표) |
 | `style/StyleKnowledge` | 코디 지식 문서를 뜰 때 `closet.style_docs`에 맞춰 넣고, 검색 때 조각을 찾음 |
 | `embedding/E5OnnxEmbeddingModel` | multilingual-e5-small을 ONNX Runtime으로 돌림(평균 풀링 + 길이 1) |
 | `embedding/HashEmbeddingModel` | 모델 없이 띄울 때(테스트·개발). 뜻을 모름 |
@@ -27,6 +29,51 @@ RAG 나누기: 이 서버는 **검색**만 합니다. 찾은 옷 후보와 코�
 - 모델을 바꾸면 코디 지식은 뜰 때 다시 넣지만(`metadata.embeddingModel`), 옷 벡터(`garments.embedding`)는 그대로입니다. 모델을 바꾸면 옷 벡터도 다시 만들어야 합니다.
 
 ## 같은 옷 합치기
+
+### 사진 벡터로 (2026-11-11부터 기본)
+
+clothes_inspect(mcp-clothes-state PR #16)가 옷마다 `embedding`(Marqo FashionSigLIP, 768개, 길이 1)과 응답의 `embeddingModel`을 줍니다. agent가 둘을 closet_save에 그대로 넘기면:
+
+1. 같은 사람 + 같은 `category` + 같은 `image_model`인 옷의 `image_embedding`을 가져와 가장 가까운 옷을 찾습니다(`ImageMatcher`).
+2. 그 유사도가 기준 이상이면 합칩니다. 기준은 보정 행렬에 따라 다릅니다: 기본(CC0 보정) 0.68, 보정 없음 0.89, DeepFashion 보정 0.43. 색 이름·색 계열·이름·톤은 보지 않습니다.
+3. 합치면 `image_embedding`을 지금까지 본 사진의 평균으로 바꿉니다(`image_count`, 10장부터는 새 사진 비중 1/10). 새 옷이면 그 벡터 그대로.
+4. 사진 벡터가 있는 입력은 사진 벡터가 없는 옛 옷과 비교하지 않습니다(옛 규칙이 틀리는 경우가 많아서). 한 번에 온 옷끼리 안 합치기와 `forceNewIds`는 그대로입니다.
+
+왜 바꿨나(DeepFashion In-shop 표본, 비상업 연구용이라 레포에 넣지 않음. 결과 문서는 팀 공유):
+
+| 옷 30벌 옷장 흉내, 새 옷 잘못 합침 5%에 맞춘 기준 | 같은 옷 맞게 합침 | 엉뚱한 옷에 합침 |
+| --- | --- | --- |
+| 글 설명 규칙(예전) | 36% | 39% (새 옷 잘못 합침 52%) |
+| FashionSigLIP, 처음 본 사진 하나 | 58% | 3.0% |
+| FashionSigLIP, 본 사진 평균 (지금 방식) | 73% | 2.2% |
+| + CC0 보정 행렬 (기본) | 78% | 1.4% |
+| + DeepFashion 보정 행렬 (학교 시연용, 레포 밖) | 85% | 0.4% |
+
+두 서버(clothes_inspect → closet_save)를 실제로 띄우고 MCP로 이어 돌린 결과(옷장 30벌 × 5명, 옷장에는 사진 한 장씩, 다시 찍은 같은 옷 75번, 새 옷 75번):
+
+| | 같은 옷 맞게 합침 | 엉뚱한 옷에 합침 | 새 옷을 잘못 합침 | 저장 시간(중앙값) |
+| --- | --- | --- | --- | --- |
+| 보정 없음 | 46/75 (61%) | 1 | 2 | 16ms |
+| CC0 보정 (기본) | 53/75 (71%) | 0 | 3 | 20ms |
+| DeepFashion 보정 | 60/75 (80%) | 0 | 3 | 20ms |
+
+- 이미지 모델 12개를 비교해서 FashionSigLIP이 가장 좋았습니다(SigLIP, SigLIP2, FashionCLIP, Jina CLIP 순, DINOv2·CLIP B 계열은 26~45%).
+- 위 숫자는 clothes_inspect 서버가 실제로 돌려준 벡터(옷 600벌, 학습에 안 쓴 옷)로 다시 잰 값입니다. 같은 옷 두 장을 옷장에 넣고 세 번째 사진으로 찾습니다.
+- 기준값: 위 5%에 맞춘 값이 보정 없음 0.886, CC0 보정 0.675, DeepFashion 보정 0.424라서 0.89 / 0.68 / 0.43으로 둡니다(새 옷 잘못 합침 4.1% / 4.3% / 약 5%).
+- 톤(밝음↔어두움) 충돌 규칙을 더하면 맞게 합침이 2~4%p 줄기만 해서 사진 쪽에는 쓰지 않습니다.
+- 스튜디오 사진(224px)이라 실제 폰 사진에서는 낮을 수 있습니다. 팀원 옷 20벌쯤으로 다시 재야 합니다.
+
+**아직 남는 문제: 중복 저장.** 옷 30벌을 앞모습으로 세 번씩 섞인 순서로 저장하면(CC0 보정, 기준 0.68) 옷장에 평균 42개가 생깁니다(같은 옷이 따로 저장된 것 17개, 다른 옷이 한 개로 섞인 것 4개). 저장할 때마다 합쳐진 옷을 다른 옷과 다시 비교해 합치는 방법도 재 봤는데, 중복은 17 → 14로 줄지만 섞임이 4 → 5로 늘어서 넣지 않았습니다(섞이면 옷 설명이 틀려지므로 중복보다 나쁨). 실제 폰 사진으로 기준값과 보정 행렬을 다시 맞추는 것이 다음 단계입니다.
+
+**보정 행렬(WCCN)**: 같은 옷 사진끼리의 차이(조명·각도·흐림) 방향을 줄이는 768×768 행렬입니다. 계산은 `(v − mu)·W`를 길이 1로. 파일은 float32 리틀 엔디언 `mu`(768개) 다음 `W`(768×768, 행 우선)이고, 크기가 틀리면 서버가 뜨지 않습니다(기준이 조용히 어긋나지 않게).
+
+- **기본: `src/main/resources/image-adapter/fsiglip-cc0-aug.bin`** (2.4MB, sha256 `bf6a9fa1…60dc`). [clothing-dataset-small](https://github.com/alexeygrigorev/clothing-dataset-small)(CC0, 아무 용도로나 사용 가능)의 옷 사진 1,400장을 한 장마다 폰으로 찍은 것처럼 6번 흔들어(박스·회전·밝기·색온도·흐림·저해상도·JPEG) "같은 옷"으로 묶고 만들었습니다(λ=3). 만드는 법: `tools/image-adapter/make_adapter.py`.
+  - 같은 방법을 DeepFashion 사진으로 하면 84%(진짜 여러 장으로 만든 것 85%와 거의 같음)인데, CC0 사진은 바닥에 놓고 찍은 사진이라 입은 사진과 달라 78%에 그칩니다. 팀원이 입고 찍은 사진(CC0로 모아서)으로 다시 만들면 더 오를 수 있습니다.
+- **DeepFashion 보정**: 같은 옷 사진 여러 장(옷 1,400벌)으로 만들어 가장 좋지만 **비상업 연구용 데이터에서 나온 것**이라 레포와 Docker 이미지에 넣지 않습니다. 학교 시연 때만 `CLOSET_IMAGE_ADAPTER=/경로/파일`, `CLOSET_IMAGE_ADAPTER_THRESHOLD=0.43`.
+- 보정을 끄려면 `CLOSET_IMAGE_ADAPTER=`(빈 값). 기준은 `CLOSET_IMAGE_THRESHOLD`(0.89).
+- 보정 행렬을 바꾸면 이미 저장된 벡터는 그대로 두고 비교할 때만 바꾸므로 다시 저장할 필요는 없습니다. 기준값은 함께 바꿔야 합니다.
+
+### 사진 벡터가 없을 때 (예전 규칙)
 
 조건: 같은 사람 + 같은 `category` + 같은 `colorFamily` + 유사도 0.90 이상 + 이름이 같은 묶음(`GarmentNames`). 합치면 `description`, `embedding`, 이름·색 이름·톤을 마지막 것으로 바꾸고 `last_seen_at`을 올립니다.
 
@@ -64,6 +111,44 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 남는 한계: 무늬·톤까지 똑같은 니트 두 벌을 다른 날 따로 찍으면 여전히 한 벌로 합칩니다. 글 설명만으로는 가를 수 없어서 사용자에게 묻는 것(forceNewIds)으로 풉니다. 사진 벡터(CLIP 등)를 쓰면 더 가를 수 있지만 보류 중입니다.
 
 "공식 Xenova 양자화"는 Hugging Face에서 받은 `onnx/model_quantized.onnx`(118,308,185바이트, sha256 `f80102d3…c193`)와 `tokenizer.json`(sha256 `0b44a9d7…4c39`)으로 Python onnxruntime에서 같은 계산을 한 값입니다(입력 input_ids·attention_mask·token_type_ids, 출력 last_hidden_state). "직접 변환"은 Hugging Face가 막힌 개발 컨테이너에서 공개 Docker 이미지의 e5-small 가중치를 ONNX로 바꿔 Java 쪽(`E5OnnxEmbeddingModel`)에서 잰 값입니다. 둘의 차이는 0.01 안쪽이고, 같은 옷은 공식 파일에서도 모두 0.90 이상(가장 낮은 것 0.914)입니다.
+
+## 사진으로 이름·무늬·격식 고르기 (2026-11-11)
+
+clothes_inspect의 이름은 "티셔츠·바지·니트"처럼 굵고, 격식은 42%가 unknown, 무늬는 늘 비어 있습니다. 그래서 "청바지", "줄무늬 옷"을 찾아도 e5 글 검색이 잘 못 찾았습니다.
+
+`closet_save`가 사진 벡터를 받으면(`embeddingModel`이 `marqo-fashionSigLIP`일 때) FashionSigLIP 글 쪽으로 미리 뽑아 둔 이름 22개·무늬 5개의 벡터(`image-labels/fsiglip-labels.json`, `tools/image-labels/make_labels.py`로 만듦)와 비교해 가장 가까운 것을 고릅니다. 서버에서 글 모델을 돌리지 않습니다.
+
+- 이름: 그 종류(top·bottom…)에 맞는 이름 중 가장 가까운 것으로 바꿉니다(청바지·슬랙스·블라우스·후드티·카디건·원피스…).
+- 무늬: 민무늬보다 0.02 넘게 가까운 무늬가 있을 때만 채우고, clothes_inspect가 준 무늬가 있으면 그대로 둡니다.
+- 격식: clothes_inspect가 unknown일 때만 이름의 격식으로 채웁니다.
+- 고른 값은 `description.imageGuess`에도 따로 남기고, clothes_inspect가 준 원래 값은 그대로 둡니다.
+
+실제 두 서버로 잰 값(DeepFashion 시험 옷 200벌로 60벌 옷장 4개, 위 5개 중 맞은 비율):
+
+| 질문 | 전 | 후 |
+| --- | --- | --- |
+| 옷 이름·무늬 15개(청바지, 후드티나 맨투맨, 줄무늬 옷 …) | 20% | 44% |
+| 상황 4개(운동, 면접, 추운 날, 더운 날) | 36% | 28% |
+
+상황 질문은 4개×4명이라 흔들림이 큽니다. 줄어든 것은 주로 면접(30→10%)인데, 여자 블라우스 상당수가 "민소매"로 바뀌며 격식 casual로 남아서입니다. clothes_inspect 이름을 글에 함께 넣어 봤지만 45%·27%로 거의 같아 넣지 않았습니다.
+
+## 영어 검색어로 사진 벡터 찾기 (closet_search `imageQuery`, 2026-11-11)
+
+agent가 `imageQuery`에 찾는 옷을 짧은 영어로 주면(예: `warm winter clothes`) FashionSigLIP 글 모델로 벡터를 만들어 옷 사진 벡터(같은 모델)와 코사인을 잽니다. 점수 = e5 점수 + 1.5 × 사진↔글 유사도. 사진 벡터가 없는 옷은 있는 옷들의 평균을 더해서 손해 보지 않게 합니다. 글 모델이 꺼져 있거나 실패하면 `imageQuery`를 무시하고 예전처럼 찾습니다.
+
+- 글 모델: `text_model.onnx`를 int8로 줄인 것(~111MB, `tools/image-labels/quantize_text.py`). jar에 넣지 않고 `CLOSET_IMAGE_TEXT_MODEL_URI`, `CLOSET_IMAGE_TEXT_TOKENIZER_URI`로 줍니다(비우면 꺼짐, 기본은 꺼짐).
+- 전처리: open_clip SigLIP 방식(문장부호 빼기·소문자 → T5 sentencepiece, 64토큰, 빈칸 1). 앞에 `a photo of `를 붙입니다. Java 토큰 id·벡터가 Python과 같은지 `ImageTextModelTest`(FSIGLIP_TEXT_DIR)로 확인.
+- 가중치 1.5: Python 벤치마크에서 0.5·1·1.5·2·3 중 전체 정답률이 가장 높았습니다(1.5~2가 비슷).
+- 속도: closet_search 18ms → 64ms(글 모델 한 번), 서버 메모리 약 1.1GB.
+
+실제 두 서버로 잰 값(위와 같은 옷장·질문, 위 5개 중 맞은 비율):
+
+| 질문 | 예전 | 사진으로 이름 고르기 | + imageQuery |
+| --- | --- | --- | --- |
+| 옷 이름·무늬 15개 | 20% | 44% | 57% |
+| 상황 4개 | 36% | 28% | 37% |
+
+종류별로 돌아가며 고르기(diversify) 때문에 "원피스"를 찾아도 상의·하의가 섞여 나와서 이 표의 위 5개 정답률은 그만큼 낮게 나옵니다.
 
 ## closet_search
 

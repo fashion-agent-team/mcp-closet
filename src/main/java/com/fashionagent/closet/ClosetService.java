@@ -1,6 +1,7 @@
 package com.fashionagent.closet;
 
 import com.fashionagent.closet.embedding.E5;
+import com.fashionagent.closet.embedding.ImageTextModel;
 import com.fashionagent.closet.style.StyleKnowledge;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -27,15 +28,21 @@ public class ClosetService {
     static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     private final GarmentRepository garments;
+    private final ImageMatcher images;
+    private final ImageLabels labels;
+    private final ImageTextModel imageText;
     private final EmbeddingModel embedding;
     private final StyleKnowledge style;
     private final ClosetProperties props;
     private final JsonMapper json;
     private final Clock clock;
 
-    public ClosetService(GarmentRepository garments, EmbeddingModel embedding, StyleKnowledge style,
-                         ClosetProperties props, JsonMapper json, Clock clock) {
+    public ClosetService(GarmentRepository garments, ImageMatcher images, ImageLabels labels, ImageTextModel imageText,
+                         EmbeddingModel embedding, StyleKnowledge style, ClosetProperties props, JsonMapper json, Clock clock) {
         this.garments = garments;
+        this.images = images;
+        this.labels = labels;
+        this.imageText = imageText;
         this.embedding = embedding;
         this.style = style;
         this.props = props;
@@ -46,30 +53,53 @@ public class ClosetService {
     public record Saved(String inputId, String garmentId, boolean isNew) {
     }
 
-    /** closet_save. 같은 옷(종류·색 계열·이름 묶음이 같고 유사도가 기준 이상)이면 새로 만들지 않고 합친다. */
+    /** closet_save. 같은 옷이면 새로 만들지 않고 합친다. */
     @Transactional
     public Map<String, Object> save(UUID userId, List<Garment> input) {
-        return save(userId, input, List.of());
+        return save(userId, input, List.of(), null);
     }
 
     /**
+     * 같은 옷 판단:
+     * <ul>
+     * <li>옷 사진 벡터(garments[].embedding)와 embeddingModel이 있으면: 같은 종류이고 같은 모델 벡터가 있는 내 옷 중
+     *     가장 가까운 옷이 기준({@link ImageMatcher#threshold()}) 이상이면 합친다. 색·이름·톤 규칙은 쓰지 않는다
+     *     (DeepFashion 측정에서 색 판별이 사진마다 달라 같은 옷을 갈랐고, 톤 규칙은 맞게 합침을 줄이기만 했다).</li>
+     * <li>벡터가 없으면: 예전 규칙(종류·색 계열·이름 묶음이 같고 글 유사도 0.90 이상, 톤·무늬 충돌 없음).</li>
+     * </ul>
      * forceNewIds: 사용자가 "다른 옷이에요"라고 한 입력 id(Garment.id). 비슷해도 합치지 않고 새로 만든다.
      * 한 번에 받은 옷끼리는 서로 합치지 않고, 같은 기존 옷에 두 벌을 합치지도 않는다(한 사진에 같이 있으면 다른 옷).
      */
     @Transactional
     public Map<String, Object> save(UUID userId, List<Garment> input, List<String> forceNewIds) {
+        return save(userId, input, forceNewIds, null);
+    }
+
+    @Transactional
+    public Map<String, Object> save(UUID userId, List<Garment> input, List<String> forceNewIds, String embeddingModel) {
         if (input == null || input.isEmpty()) {
             throw ClosetException.badRequest("garments가 비어 있어요.");
         }
         if (input.size() > props.maxGarmentsPerSave()) {
             throw ClosetException.badRequest("한 번에 " + props.maxGarmentsPerSave() + "벌까지 저장할 수 있어요.");
         }
+        String model = embeddingModel == null || embeddingModel.isBlank() ? null : embeddingModel.trim();
+        if (model != null && model.length() > 40) {
+            throw ClosetException.badRequest("embeddingModel은 40자 이내여야 해요.");
+        }
         var normalized = new ArrayList<Garment.Normalized>();
+        var imgs = new ArrayList<float[]>();
+        var guesses = new ArrayList<ImageLabels.Guess>();
         for (Garment g : input) {
             if (g == null) {
                 throw ClosetException.badRequest("garments에 빈 값이 있어요.");
             }
-            normalized.add(g.normalize());
+            Garment.Normalized n = g.normalize();
+            float[] img = model == null ? null : images.accept(g.embedding());
+            ImageLabels.Guess guess = img != null && model.equals(labels.model()) ? labels.guess(img, n.category()) : null;
+            normalized.add(guess == null ? n : n.withImageGuess(guess));
+            imgs.add(img);
+            guesses.add(guess);
         }
         List<float[]> vectors = embedAll(normalized.stream().map(Labels::passage).toList());
 
@@ -78,32 +108,73 @@ public class ClosetService {
         var forceNew = forceNewIds == null ? java.util.Set.<String>of()
                 : forceNewIds.stream().filter(s -> s != null && !s.isBlank()).map(String::trim).collect(java.util.stream.Collectors.toSet());
         var taken = new java.util.HashSet<String>();
+        var imageRows = new java.util.HashMap<String, List<GarmentRepository.ImageRow>>();
         var saved = new ArrayList<Saved>();
         for (int i = 0; i < input.size(); i++) {
             Garment g = input.get(i);
             Garment.Normalized n = normalized.get(i);
             float[] v = vectors == null ? null : vectors.get(i);
-            boolean mayMerge = v != null && (g.id() == null || !forceNew.contains(g.id().trim()));
-            var same = !mayMerge ? java.util.Optional.<GarmentRepository.Match>empty()
-                    : garments.nearestSame(userId, n.category(), n.colorFamily(), v, 5).stream()
-                            .filter(m -> !taken.contains(m.id()))
-                            .filter(m -> m.similarity() >= props.sameGarmentThreshold() && GarmentNames.sameKind(m.name(), n.name()))
-                            .filter(m -> !SameGarment.conflicts(n.tone(), n.pattern(), m.tone(), m.pattern()))
-                            .findFirst();
-            if (same.isPresent()) {
-                String id = same.get().id();
+            float[] img = imgs.get(i);
+            ImageLabels.Guess guess = guesses.get(i);
+            boolean force = g.id() != null && forceNew.contains(g.id().trim());
+
+            String matchId = null;
+            String keptPattern = null;
+            GarmentRepository.ImageRow matchRow = null;
+            if (img != null) {
+                if (!force) {
+                    var rows = imageRows.computeIfAbsent(n.category(), c -> garments.imageRows(userId, c, model));
+                    float[] q = images.key(img);
+                    double best = -2;
+                    for (var row : rows) {
+                        if (taken.contains(row.id())) {
+                            continue;
+                        }
+                        double sim = Vectors.dot(q, images.key(row.embedding()));
+                        if (sim > best) {
+                            best = sim;
+                            matchRow = row;
+                        }
+                    }
+                    if (matchRow != null && best >= images.threshold()) {
+                        matchId = matchRow.id();
+                    } else {
+                        matchRow = null;
+                    }
+                }
+            } else if (v != null && !force) {
+                var same = garments.nearestSame(userId, n.category(), n.colorFamily(), v, 5).stream()
+                        .filter(m -> !taken.contains(m.id()))
+                        .filter(m -> m.similarity() >= props.sameGarmentThreshold() && GarmentNames.sameKind(m.name(), n.name()))
+                        .filter(m -> !SameGarment.conflicts(n.tone(), n.pattern(), m.tone(), m.pattern()))
+                        .findFirst();
+                if (same.isPresent()) {
+                    matchId = same.get().id();
+                    keptPattern = same.get().pattern();
+                }
+            }
+
+            if (matchId != null) {
                 // 이번 사진에서 무늬를 못 봤으면 전에 본 무늬를 남긴다(다음에 다른 무늬 옷과 가를 수 있게)
-                Garment kept = g.pattern() == null || g.pattern().isBlank() ? g.withPattern(same.get().pattern()) : g;
-                garments.update(id, userId, n, describe(kept, id), v, now);
-                taken.add(id);
-                saved.add(new Saved(g.id(), id, false));
+                Garment kept = (g.pattern() == null || g.pattern().isBlank()) && keptPattern != null ? g.withPattern(keptPattern) : g;
+                garments.update(matchId, userId, n, describe(kept, matchId, guess), v, now);
+                if (img != null) {
+                    int max = props.image().maxCount();
+                    garments.setImage(matchId, userId, model, ImageMatcher.mean(matchRow.embedding(), matchRow.count(), img, max),
+                            Math.min(matchRow.count() + 1, max));
+                }
+                taken.add(matchId);
+                saved.add(new Saved(g.id(), matchId, false));
                 continue;
             }
             if (size >= props.maxClosetSize()) {
                 throw ClosetException.badRequest("옷장이 가득 찼어요(" + props.maxClosetSize() + "벌).");
             }
             String id = Ids.garmentId();
-            garments.insert(id, userId, n, describe(g, id), v, now);
+            garments.insert(id, userId, n, describe(g, id, guess), v, now);
+            if (img != null) {
+                garments.setImage(id, userId, model, img, 1);
+            }
             taken.add(id);
             size++;
             saved.add(new Saved(g.id(), id, true));
@@ -121,11 +192,20 @@ public class ClosetService {
         }
     }
 
-    /** description(jsonb)에는 받은 Garment 전체를 두되 id는 옷장 id로 바꾼다. */
-    private String describe(Garment g, String garmentId) {
+    /** description(jsonb)에는 받은 Garment 전체를 두되 id는 옷장 id로 바꾸고, 사진 벡터(숫자 768개)는 따로 두므로 뺀다. */
+    private String describe(Garment g, String garmentId, ImageLabels.Guess guess) {
         Garment copy = new Garment(garmentId, g.category(), g.name(), g.colorName(), g.colorFamily(), g.tone(), g.pattern(),
-                g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence());
-        return json.writeValueAsString(copy);
+                g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence(), null);
+        if (guess == null) {
+            return json.writeValueAsString(copy);
+        }
+        // clothes_inspect가 준 값은 그대로 두고, 사진에서 고른 값은 imageGuess에 따로 남긴다
+        var node = (tools.jackson.databind.node.ObjectNode) json.valueToTree(copy);
+        var ig = node.putObject("imageGuess");
+        ig.put("name", guess.name());
+        ig.put("pattern", guess.pattern());
+        ig.put("formality", guess.formality());
+        return json.writeValueAsString(node);
     }
 
     /** closet_wear. 남의 옷이나 없는 옷 id가 섞이면 아무것도 기록하지 않는다. */
@@ -179,6 +259,15 @@ public class ClosetService {
     /** closet_search. RAG의 검색 단계: 내 옷 후보 + 코디 지식 조각. 추천 문장은 agent의 GPT가 만든다. */
     public Map<String, Object> search(UUID userId, String situation, String occasion, Double apparentTemperature,
                                       List<String> excludeGarmentIds, Integer limit) {
+        return search(userId, situation, occasion, apparentTemperature, excludeGarmentIds, limit, null);
+    }
+
+    /**
+     * imageQuery(영어, 예: "warm winter clothes")가 있고 글 모델이 켜져 있으면 옷 사진 벡터와도 비교해
+     * e5 점수에 weight × 사진↔글 유사도를 더한다. 사진 벡터가 없는 옷은 있는 옷들의 평균을 더해 손해 보지 않게 한다.
+     */
+    public Map<String, Object> search(UUID userId, String situation, String occasion, Double apparentTemperature,
+                                      List<String> excludeGarmentIds, Integer limit, String imageQuery) {
         if (situation == null || situation.isBlank()) {
             throw ClosetException.badRequest("situation이 없어요.");
         }
@@ -207,13 +296,33 @@ public class ClosetService {
             return result(List.of(), notes, true);
         }
         LocalDate today = LocalDate.now(clock.withZone(SEOUL));
+        Map<String, Double> imageSim = imageSimilarities(userId, imageQuery);
+        double w = props.image().text().weight();
+        double fill = imageSim.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
         var ranked = garments.rankedForUser(userId, q, exclude).stream()
                 .filter(g -> !CandidateFilter.excluded(g, occ, apparentTemperature))
-                .map(g -> g.withSimilarity(g.similarity() + CandidateFilter.formalityBonus(occ, g.formality())
+                .map(g -> g.withSimilarity(g.similarity() + (imageSim.isEmpty() ? 0 : w * imageSim.getOrDefault(g.id(), fill))
+                        + CandidateFilter.formalityBonus(occ, g.formality())
                         - CandidateFilter.recencyPenalty(g.lastWorn(), today)))
                 .sorted(java.util.Comparator.comparingDouble(GarmentRepository.Candidate::similarity).reversed())
                 .toList();
         return result(diversify(ranked, n), notes, false);
+    }
+
+    private Map<String, Double> imageSimilarities(UUID userId, String imageQuery) {
+        if (imageQuery == null || imageQuery.isBlank() || !imageText.enabled()) {
+            return Map.of();
+        }
+        if (imageQuery.length() > 200) {
+            throw ClosetException.badRequest("imageQuery는 200자 이내여야 해요.");
+        }
+        try {
+            return garments.imageSimilarities(userId, imageText.embed("a photo of " + imageQuery.trim()), imageText.model());
+        } catch (RuntimeException e) {
+            // 사진↔글은 덤이라 실패해도 글 검색 결과는 돌려준다
+            log.warn("imageQuery 임베딩 실패: {}", e.toString());
+            return Map.of();
+        }
     }
 
     /** 비 문서는 상황 문장에 비 이야기가 있을 때만 넣는다(아니면 어느 검색에나 끼어서). */

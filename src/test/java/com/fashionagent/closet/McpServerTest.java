@@ -29,7 +29,7 @@ import tools.jackson.databind.json.JsonMapper;
  * 임베딩은 모델 없이 도는 hash를 쓴다(뜻은 모르지만 같은 글은 같은 벡터). Docker가 없으면 건너뛴다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"closet.embedding.provider=hash"})
+        properties = {"closet.embedding.provider=hash", "closet.image.adapter-path="})
 @Import(TestDb.class)
 @Testcontainers(disabledWithoutDocker = true)
 class McpServerTest {
@@ -72,6 +72,7 @@ class McpServerTest {
         assertThat((List<String>) outfits.inputSchema().get("required")).containsExactly("userId");
         var search = tools.stream().filter(t -> t.name().equals("closet_search")).findFirst().orElseThrow();
         assertThat((List<String>) search.inputSchema().get("required")).containsExactlyInAnyOrder("userId", "situation");
+        assertThat(((Map<String, Object>) search.inputSchema().get("properties")).keySet()).contains("imageQuery");
         var save = tools.stream().filter(t -> t.name().equals("closet_save")).findFirst().orElseThrow();
         assertThat((List<String>) save.inputSchema().get("required")).containsExactlyInAnyOrder("userId", "garments");
     }
@@ -97,7 +98,9 @@ class McpServerTest {
         assertThat(sources).allMatch(s -> List.of("style_docs/interview.md", "style_docs/weather-9to12.md",
                 "style_docs/color-basics.md", "style_docs/color-combos.md", "style_docs/pattern-material.md").contains(s));
         // 비 이야기가 있을 때만 비 문서
-        JsonNode rainy = call("closet_search", Map.of("userId", user, "situation", "오후에 비 와요, 출근", "occasion", "business"));
+        // imageQuery는 글 모델이 꺼져 있으면 무시하고 그대로 찾는다
+        JsonNode rainy = call("closet_search", Map.of("userId", user, "situation", "오후에 비 와요, 출근", "occasion", "business",
+                "imageQuery", "office clothes for a rainy day"));
         var rainSources = new ArrayList<String>();
         rainy.get("styleNotes").forEach(n -> rainSources.add(n.get("source").asString()));
         assertThat(rainSources).contains("style_docs/rain.md");
@@ -139,6 +142,91 @@ class McpServerTest {
                 garment("g1", "top", "니트", "차콜 그레이", "gray", "dark", "smart", "니트 같음"))));
         assertThat(otherSave.get("saved").get(0).get("isNew").asBoolean()).isTrue();
         assertThat(otherSave.get("saved").get(0).get("garmentId").asString()).isNotEqualTo(knit);
+    }
+
+    @Test
+    @DisplayName("사진 벡터가 있으면 사진으로 판단: 색 판별이 달라도 같은 옷은 합치고, 같은 색 흰 티셔츠라도 사진이 다르면 새 옷")
+    void imageMatch() {
+        List<Double> shirtA = vector(1, 0.0);
+        // 같은 셔츠를 다른 날 찍음: 벡터는 조금 다르고(코사인 약 0.95) clothes_inspect가 색을 베이지로 봄
+        List<Double> shirtA2 = vector(1, 0.33);
+        List<Double> shirtB = vector(2, 0.0);   // 다른 흰 티셔츠(코사인 0)
+
+        var first = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        first.put("embedding", shirtA);
+        JsonNode r1 = call("closet_save", Map.of("userId", user, "garments", List.of(first), "embeddingModel", "marqo-fashionSigLIP"));
+        String a = r1.get("saved").get(0).get("garmentId").asString();
+
+        var again = garment("g1", "top", "티셔츠", "베이지", "beige", "mid", "casual", "면");
+        again.put("embedding", shirtA2);
+        JsonNode r2 = call("closet_save", Map.of("userId", user, "garments", List.of(again), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r2.get("saved").get(0).get("garmentId").asString()).isEqualTo(a);
+        assertThat(r2.get("saved").get(0).get("isNew").asBoolean()).isFalse();
+        assertThat(jdbc.sql("SELECT image_count FROM closet.garments WHERE id = :id").param("id", a).query(Integer.class).single())
+                .isEqualTo(2);
+        // 사진 벡터는 description(jsonb)에 넣지 않는다
+        assertThat(jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", a).query(String.class).single())
+                .doesNotContain("embedding");
+
+        var other = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        other.put("embedding", shirtB);
+        JsonNode r3 = call("closet_save", Map.of("userId", user, "garments", List.of(other), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r3.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+
+        // 모델 이름이 다르면 비교하지 않는다(새 옷)
+        var otherModel = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        otherModel.put("embedding", shirtA);
+        JsonNode r4 = call("closet_save", Map.of("userId", user, "garments", List.of(otherModel), "embeddingModel", "other-model"));
+        assertThat(r4.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+
+        // forceNewIds는 사진이 같아도 새 옷
+        var forced = garment("g9", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        forced.put("embedding", shirtA);
+        JsonNode r5 = call("closet_save", Map.of("userId", user, "garments", List.of(forced), "embeddingModel", "marqo-fashionSigLIP",
+                "forceNewIds", List.of("g9")));
+        assertThat(r5.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+
+        // 길이가 틀린 벡터는 무시하고 예전 규칙으로 저장(오류 아님)
+        var bad = garment("g1", "bottom", "청바지", "파란색", "blue", "mid", "casual", "데님");
+        bad.put("embedding", List.of(0.1, 0.2));
+        JsonNode r6 = call("closet_save", Map.of("userId", user, "garments", List.of(bad), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r6.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+        String jeans = r6.get("saved").get(0).get("garmentId").asString();
+        assertThat(jdbc.sql("SELECT image_model FROM closet.garments WHERE id = :id").param("id", jeans).query(String.class).optional())
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("clothes_inspect 응답의 옷을 그대로 넘겨도 받는다(defects.checkedBy, box, position, confidence, embedding)")
+    void acceptsClothesInspectGarment() {
+        var g = new LinkedHashMap<String, Object>();
+        g.put("id", "g1");
+        g.put("category", "top");
+        g.put("name", "셔츠");
+        g.put("colorName", "흰색");
+        g.put("colorFamily", "white");
+        g.put("tone", "light");
+        g.put("pattern", null);
+        g.put("material", null);
+        g.put("notes", null);
+        g.put("formality", "smart");
+        g.put("defects", List.of(Map.of("kind", "stain", "where", "오른쪽 소매 끝", "confidence", 0.83, "checkedBy", "model")));
+        g.put("box", Map.of("x", 0.1, "y", 0.2, "w", 0.3, "h", 0.4));
+        g.put("position", null);
+        g.put("confidence", 0.91);
+        g.put("embedding", vector(3, 0.0));
+        JsonNode r = call("closet_save", Map.of("userId", user, "garments", List.of(g), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r.has("saved")).as(r.toString()).isTrue();
+        assertThat(r.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+    }
+
+    /** 768차원 길이 1 벡터: axis 축에 cos, 그 옆 축에 sin(angle). */
+    private static List<Double> vector(int axis, double angle) {
+        var v = new ArrayList<Double>();
+        for (int i = 0; i < 768; i++) {
+            v.add(i == axis ? Math.cos(angle) : i == axis + 100 ? Math.sin(angle) : 0.0);
+        }
+        return v;
     }
 
     @Test

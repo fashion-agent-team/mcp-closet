@@ -29,27 +29,31 @@ public class ClosetTools {
             옷 추천 1단계에서 부르고, 추천은 candidates 안의 옷과 styleNotes를 근거로만 하세요. \
             empty가 true면 옷장이 비어 있으니 "옷 확인을 몇 번 하면 옷장이 채워져요"라고 안내하세요. \
             occasion·apparentTemperature를 주면 그 자리·날씨에 맞지 않는 옷(예: 면접에 운동복, 더운 날 겉옷)은 뺍니다. \
-            어제·그제 입은 옷은 점수가 조금 낮아집니다(lastWorn으로 언제 입었는지 알 수 있음).""")
+            어제·그제 입은 옷은 점수가 조금 낮아집니다(lastWorn으로 언제 입었는지 알 수 있음). \
+            imageQuery에 찾는 옷을 짧은 영어로 함께 주면(예: warm winter clothes, formal office attire for a job interview) 옷 사진으로도 찾아 더 정확합니다.""")
     public Object closetSearch(
             @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
             @ToolParam(description = "일정·날씨로 만든 상황 문장. 예: 오늘 오전 면접, 체감 9도") String situation,
             @ToolParam(required = false, description = "mourning | wedding | formal | business | active | casual") String occasion,
             @ToolParam(required = false, description = "체감 온도(섭씨). 예: 9.5") Double apparentTemperature,
             @ToolParam(required = false, description = "후보에서 뺄 garmentId 목록. 예: 어제 입은 옷") List<String> excludeGarmentIds,
-            @ToolParam(required = false, description = "후보 최대 개수. 기본 8, 최대 20") Integer limit) {
-        return run(() -> service.search(Ids.userId(userId), situation, occasion, apparentTemperature, excludeGarmentIds, limit));
+            @ToolParam(required = false, description = "후보 최대 개수. 기본 8, 최대 20") Integer limit,
+            @ToolParam(required = false, description = "찾는 옷을 짧은 영어로(200자 이내). 예: jeans, striped clothes, light summer clothes") String imageQuery) {
+        return run(() -> service.search(Ids.userId(userId), situation, occasion, apparentTemperature, excludeGarmentIds, limit, imageQuery));
     }
 
     @Tool(name = "closet_save", description = """
             옷 추천을 마칠 때("이걸로 할게") 2단계에서 clothes_inspect로 본 옷들을 옷장에 기록합니다. 사진은 저장하지 않습니다. \
             이미 있는 옷이면 새로 만들지 않고 합칩니다(isNew=false). 한 번에 넘긴 옷끼리는 합치지 않습니다. \
+            clothes_inspect가 준 garments[].embedding(옷 사진 벡터)과 embeddingModel을 그대로 넘기면 사진으로 같은 옷을 판단해서 훨씬 정확합니다. \
             합쳤는데 사용자가 "그건 다른 옷이에요"라고 하면 그 옷의 id를 forceNewIds에 넣어 다시 부르세요. \
             돌려준 garmentId로 closet_wear를 부르세요.""")
     public Object closetSave(
             @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
             @ToolParam(description = "clothes_inspect가 돌려준 Garment 목록(최대 20벌)") List<Garment> garments,
-            @ToolParam(required = false, description = "비슷해도 새 옷으로 저장할 Garment.id 목록. 예: g2") List<String> forceNewIds) {
-        return run(() -> service.save(Ids.userId(userId), garments, forceNewIds));
+            @ToolParam(required = false, description = "비슷해도 새 옷으로 저장할 Garment.id 목록. 예: g2") List<String> forceNewIds,
+            @ToolParam(required = false, description = "clothes_inspect 응답의 embeddingModel. 예: marqo-fashionSigLIP. 없으면 embedding을 쓰지 않음") String embeddingModel) {
+        return run(() -> service.save(Ids.userId(userId), garments, forceNewIds, embeddingModel));
     }
 
     @Tool(name = "closet_wear", description = """

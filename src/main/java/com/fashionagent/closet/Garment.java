@@ -52,6 +52,19 @@ public record Garment(
     /** DB CHECK 제약에 맞춘 값. 종류가 없으면 저장할 수 없고, 나머지는 모르면 unknown·mid 등으로 둔다. */
     record Normalized(String category, String name, String colorName, String colorFamily, String tone, String formality,
                       String pattern, String material, String notes) {
+
+        /**
+         * 사진에서 고른 값으로 채운다: 이름은 사진 쪽(clothes_inspect 이름은 "티셔츠"처럼 굵어서), 무늬·격식은 비어 있을 때만.
+         * 측정은 {@link ImageLabels}.
+         */
+        Normalized withImageGuess(ImageLabels.Guess g) {
+            return new Normalized(category,
+                    g.name() == null ? name : g.name(),
+                    colorName, colorFamily, tone,
+                    "unknown".equals(formality) && g.formality() != null ? g.formality() : formality,
+                    pattern == null && g.pattern() != null ? g.pattern() : pattern,
+                    material, notes);
+        }
     }
 
     Normalized normalize() {

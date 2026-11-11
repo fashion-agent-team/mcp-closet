@@ -28,16 +28,18 @@ public class ClosetService {
 
     private final GarmentRepository garments;
     private final ImageMatcher images;
+    private final ImageLabels labels;
     private final EmbeddingModel embedding;
     private final StyleKnowledge style;
     private final ClosetProperties props;
     private final JsonMapper json;
     private final Clock clock;
 
-    public ClosetService(GarmentRepository garments, ImageMatcher images, EmbeddingModel embedding, StyleKnowledge style,
-                         ClosetProperties props, JsonMapper json, Clock clock) {
+    public ClosetService(GarmentRepository garments, ImageMatcher images, ImageLabels labels, EmbeddingModel embedding,
+                         StyleKnowledge style, ClosetProperties props, JsonMapper json, Clock clock) {
         this.garments = garments;
         this.images = images;
+        this.labels = labels;
         this.embedding = embedding;
         this.style = style;
         this.props = props;
@@ -83,11 +85,18 @@ public class ClosetService {
             throw ClosetException.badRequest("embeddingModel은 40자 이내여야 해요.");
         }
         var normalized = new ArrayList<Garment.Normalized>();
+        var imgs = new ArrayList<float[]>();
+        var guesses = new ArrayList<ImageLabels.Guess>();
         for (Garment g : input) {
             if (g == null) {
                 throw ClosetException.badRequest("garments에 빈 값이 있어요.");
             }
-            normalized.add(g.normalize());
+            Garment.Normalized n = g.normalize();
+            float[] img = model == null ? null : images.accept(g.embedding());
+            ImageLabels.Guess guess = img != null && model.equals(labels.model()) ? labels.guess(img, n.category()) : null;
+            normalized.add(guess == null ? n : n.withImageGuess(guess));
+            imgs.add(img);
+            guesses.add(guess);
         }
         List<float[]> vectors = embedAll(normalized.stream().map(Labels::passage).toList());
 
@@ -102,7 +111,8 @@ public class ClosetService {
             Garment g = input.get(i);
             Garment.Normalized n = normalized.get(i);
             float[] v = vectors == null ? null : vectors.get(i);
-            float[] img = model == null ? null : images.accept(g.embedding());
+            float[] img = imgs.get(i);
+            ImageLabels.Guess guess = guesses.get(i);
             boolean force = g.id() != null && forceNew.contains(g.id().trim());
 
             String matchId = null;
@@ -144,7 +154,7 @@ public class ClosetService {
             if (matchId != null) {
                 // 이번 사진에서 무늬를 못 봤으면 전에 본 무늬를 남긴다(다음에 다른 무늬 옷과 가를 수 있게)
                 Garment kept = (g.pattern() == null || g.pattern().isBlank()) && keptPattern != null ? g.withPattern(keptPattern) : g;
-                garments.update(matchId, userId, n, describe(kept, matchId), v, now);
+                garments.update(matchId, userId, n, describe(kept, matchId, guess), v, now);
                 if (img != null) {
                     int max = props.image().maxCount();
                     garments.setImage(matchId, userId, model, ImageMatcher.mean(matchRow.embedding(), matchRow.count(), img, max),
@@ -158,7 +168,7 @@ public class ClosetService {
                 throw ClosetException.badRequest("옷장이 가득 찼어요(" + props.maxClosetSize() + "벌).");
             }
             String id = Ids.garmentId();
-            garments.insert(id, userId, n, describe(g, id), v, now);
+            garments.insert(id, userId, n, describe(g, id, guess), v, now);
             if (img != null) {
                 garments.setImage(id, userId, model, img, 1);
             }
@@ -180,10 +190,19 @@ public class ClosetService {
     }
 
     /** description(jsonb)에는 받은 Garment 전체를 두되 id는 옷장 id로 바꾸고, 사진 벡터(숫자 768개)는 따로 두므로 뺀다. */
-    private String describe(Garment g, String garmentId) {
+    private String describe(Garment g, String garmentId, ImageLabels.Guess guess) {
         Garment copy = new Garment(garmentId, g.category(), g.name(), g.colorName(), g.colorFamily(), g.tone(), g.pattern(),
                 g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence(), null);
-        return json.writeValueAsString(copy);
+        if (guess == null) {
+            return json.writeValueAsString(copy);
+        }
+        // clothes_inspect가 준 값은 그대로 두고, 사진에서 고른 값은 imageGuess에 따로 남긴다
+        var node = (tools.jackson.databind.node.ObjectNode) json.valueToTree(copy);
+        var ig = node.putObject("imageGuess");
+        ig.put("name", guess.name());
+        ig.put("pattern", guess.pattern());
+        ig.put("formality", guess.formality());
+        return json.writeValueAsString(node);
     }
 
     /** closet_wear. 남의 옷이나 없는 옷 id가 섞이면 아무것도 기록하지 않는다. */

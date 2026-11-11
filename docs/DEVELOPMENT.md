@@ -13,6 +13,7 @@
 | `GarmentNames` | 같은 옷인지 볼 때 이름 비교(니트=스웨터, 자켓=재킷 …) |
 | `SameGarment` | (사진 벡터가 없을 때) 같은 옷 후보라도 톤(light↔dark)·무늬가 다르면 다른 옷 |
 | `ImageMatcher` | 옷 사진 벡터 두 개가 같은 옷인지(코사인, 보정 행렬이 있으면 바꾼 뒤), 평균 갱신 |
+| `ImageLabels` | 옷 사진 벡터로 이름·무늬·격식 고르기(zero-shot, 미리 계산한 글 벡터 표) |
 | `style/StyleKnowledge` | 코디 지식 문서를 뜰 때 `closet.style_docs`에 맞춰 넣고, 검색 때 조각을 찾음 |
 | `embedding/E5OnnxEmbeddingModel` | multilingual-e5-small을 ONNX Runtime으로 돌림(평균 풀링 + 길이 1) |
 | `embedding/HashEmbeddingModel` | 모델 없이 띄울 때(테스트·개발). 뜻을 모름 |
@@ -110,6 +111,28 @@ e5 small은 "같은 색 비슷한 상의"를 아주 가깝게 봐서 유사도�
 남는 한계: 무늬·톤까지 똑같은 니트 두 벌을 다른 날 따로 찍으면 여전히 한 벌로 합칩니다. 글 설명만으로는 가를 수 없어서 사용자에게 묻는 것(forceNewIds)으로 풉니다. 사진 벡터(CLIP 등)를 쓰면 더 가를 수 있지만 보류 중입니다.
 
 "공식 Xenova 양자화"는 Hugging Face에서 받은 `onnx/model_quantized.onnx`(118,308,185바이트, sha256 `f80102d3…c193`)와 `tokenizer.json`(sha256 `0b44a9d7…4c39`)으로 Python onnxruntime에서 같은 계산을 한 값입니다(입력 input_ids·attention_mask·token_type_ids, 출력 last_hidden_state). "직접 변환"은 Hugging Face가 막힌 개발 컨테이너에서 공개 Docker 이미지의 e5-small 가중치를 ONNX로 바꿔 Java 쪽(`E5OnnxEmbeddingModel`)에서 잰 값입니다. 둘의 차이는 0.01 안쪽이고, 같은 옷은 공식 파일에서도 모두 0.90 이상(가장 낮은 것 0.914)입니다.
+
+## 사진으로 이름·무늬·격식 고르기 (2026-11-11)
+
+clothes_inspect의 이름은 "티셔츠·바지·니트"처럼 굵고, 격식은 42%가 unknown, 무늬는 늘 비어 있습니다. 그래서 "청바지", "줄무늬 옷"을 찾아도 e5 글 검색이 잘 못 찾았습니다.
+
+`closet_save`가 사진 벡터를 받으면(`embeddingModel`이 `marqo-fashionSigLIP`일 때) FashionSigLIP 글 쪽으로 미리 뽑아 둔 이름 22개·무늬 5개의 벡터(`image-labels/fsiglip-labels.json`, `tools/image-labels/make_labels.py`로 만듦)와 비교해 가장 가까운 것을 고릅니다. 서버에서 글 모델을 돌리지 않습니다.
+
+- 이름: 그 종류(top·bottom…)에 맞는 이름 중 가장 가까운 것으로 바꿉니다(청바지·슬랙스·블라우스·후드티·카디건·원피스…).
+- 무늬: 민무늬보다 0.02 넘게 가까운 무늬가 있을 때만 채우고, clothes_inspect가 준 무늬가 있으면 그대로 둡니다.
+- 격식: clothes_inspect가 unknown일 때만 이름의 격식으로 채웁니다.
+- 고른 값은 `description.imageGuess`에도 따로 남기고, clothes_inspect가 준 원래 값은 그대로 둡니다.
+
+실제 두 서버로 잰 값(DeepFashion 시험 옷 200벌로 60벌 옷장 4개, 위 5개 중 맞은 비율):
+
+| 질문 | 전 | 후 |
+| --- | --- | --- |
+| 옷 이름·무늬 15개(청바지, 후드티나 맨투맨, 줄무늬 옷 …) | 20% | 44% |
+| 상황 4개(운동, 면접, 추운 날, 더운 날) | 36% | 28% |
+
+상황 질문은 4개×4명이라 흔들림이 큽니다. 줄어든 것은 주로 면접(30→10%)인데, 여자 블라우스 상당수가 "민소매"로 바뀌며 격식 casual로 남아서입니다. clothes_inspect 이름을 글에 함께 넣어 봤지만 45%·27%로 거의 같아 넣지 않았습니다.
+
+다음: 상황 질문은 사진 벡터와 영어 글을 직접 비교하는 것이 더 낫습니다(Python 벤치마크에서 상황 28→52%). 서버에 FashionSigLIP 글 모델을 넣고 agent가 영어 검색어를 함께 주는 방식으로 이어서 봅니다.
 
 ## closet_search
 

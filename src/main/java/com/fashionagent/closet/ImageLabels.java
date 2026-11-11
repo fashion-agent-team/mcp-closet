@@ -1,0 +1,112 @@
+package com.fashionagent.closet;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+/**
+ * 옷 사진 벡터로 옷 이름·무늬·격식을 고른다(zero-shot). clothes_inspect의 이름은 "티셔츠"·"바지"처럼 굵고 무늬는 늘 비어 있어서,
+ * FashionSigLIP 글 벡터 표(resources/image-labels/fsiglip-labels.json, tools/image-labels/make_labels.py로 만듦)와
+ * 사진 벡터의 유사도로 "후드티", "청바지", "줄무늬"를 고른다. 글 모델은 서버에 없어도 된다.
+ *
+ * <p>측정(DeepFashion 옷 600벌, 옷장 60벌에서 "청바지"·"꽃무늬 옷" 같은 질문 15개의 위 5개 정답률): 옷 설명 글만 41% → 이 이름·무늬를 넣은 글 69%.
+ */
+@Component
+public class ImageLabels {
+
+    private static final Logger log = LoggerFactory.getLogger(ImageLabels.class);
+    static final String RESOURCE = "image-labels/fsiglip-labels.json";
+
+    record Label(String ko, List<String> categories, String formality, float[] vector) {
+    }
+
+    /** 고른 값. pattern은 무지로 보이면 null. */
+    public record Guess(String name, String pattern, String formality) {
+    }
+
+    private final String model;
+    private final List<Label> names = new ArrayList<>();
+    private final List<Label> patterns = new ArrayList<>();
+    private final double patternMargin;
+
+    public ImageLabels(JsonMapper json) {
+        try (InputStream in = ImageLabels.class.getClassLoader().getResourceAsStream(RESOURCE)) {
+            if (in == null) {
+                throw new IllegalStateException("없음: " + RESOURCE);
+            }
+            JsonNode root = json.readTree(in);
+            this.model = root.get("model").asString();
+            this.patternMargin = root.get("patternMargin").asDouble();
+            for (JsonNode n : root.get("names")) {
+                var cats = new ArrayList<String>();
+                n.get("categories").forEach(c -> cats.add(c.asString()));
+                names.add(new Label(n.get("ko").asString(), cats, n.get("formality").asString(), vector(n.get("vector"))));
+            }
+            for (JsonNode p : root.get("patterns")) {
+                JsonNode ko = p.get("ko");
+                patterns.add(new Label(ko == null || ko.isNull() ? null : ko.asString(), List.of(), null, vector(p.get("vector"))));
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("옷 이름 표를 읽지 못했어요: " + RESOURCE, e);
+        }
+        log.info("옷 사진 이름 표: 이름 {}개, 무늬 {}개 ({})", names.size(), patterns.size(), model);
+    }
+
+    /** 이 표를 만든 사진 모델. clothes_inspect의 embeddingModel과 같을 때만 쓴다. */
+    public String model() {
+        return model;
+    }
+
+    /**
+     * @param v        길이 1인 사진 벡터(보정 행렬을 쓰기 전 원래 벡터)
+     * @param category clothes_inspect가 정한 종류. 그 종류에 맞는 이름 중에서만 고른다(바지를 셔츠라고 하지 않게)
+     */
+    public Guess guess(float[] v, String category) {
+        Label best = null;
+        double bs = -2;
+        for (Label l : names) {
+            if (!l.categories().contains(category)) {
+                continue;
+            }
+            double s = Vectors.dot(v, l.vector());
+            if (s > bs) {
+                bs = s;
+                best = l;
+            }
+        }
+        String pattern = null;
+        double solid = Vectors.dot(v, patterns.get(0).vector());
+        double ps = -2;
+        for (Label p : patterns.subList(1, patterns.size())) {
+            double s = Vectors.dot(v, p.vector());
+            if (s > ps) {
+                ps = s;
+                pattern = p.ko();
+            }
+        }
+        if (ps - solid <= patternMargin) {
+            pattern = null;
+        }
+        return best == null ? new Guess(null, pattern, null)
+                : new Guess(best.ko(), pattern, "unknown".equals(best.formality()) ? null : best.formality());
+    }
+
+    private static float[] vector(JsonNode arr) {
+        float[] v = new float[arr.size()];
+        for (int i = 0; i < v.length; i++) {
+            v[i] = (float) arr.get(i).asDouble();
+        }
+        return v;
+    }
+
+    Map<String, Integer> sizes() {
+        return Map.of("names", names.size(), "patterns", patterns.size());
+    }
+}

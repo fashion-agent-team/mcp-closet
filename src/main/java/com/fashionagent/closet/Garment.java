@@ -30,7 +30,8 @@ public record Garment(
         @ToolParam(required = false, description = "clothes_inspect가 준 옷 사진 벡터(768개). 그대로 넘기세요. 같은 옷 판단에 씀") List<Double> embedding) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Defect(String kind, String where, Double confidence) {
+    public record Defect(String kind, String where, Double confidence,
+                         @ToolParam(required = false, description = "model | gpt. clothes_inspect가 누가 확인했는지") String checkedBy) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

@@ -193,6 +193,30 @@ class McpServerTest {
                 .isEmpty();
     }
 
+    @Test
+    @DisplayName("clothes_inspect 응답의 옷을 그대로 넘겨도 받는다(defects.checkedBy, box, position, confidence, embedding)")
+    void acceptsClothesInspectGarment() {
+        var g = new LinkedHashMap<String, Object>();
+        g.put("id", "g1");
+        g.put("category", "top");
+        g.put("name", "셔츠");
+        g.put("colorName", "흰색");
+        g.put("colorFamily", "white");
+        g.put("tone", "light");
+        g.put("pattern", null);
+        g.put("material", null);
+        g.put("notes", null);
+        g.put("formality", "smart");
+        g.put("defects", List.of(Map.of("kind", "stain", "where", "오른쪽 소매 끝", "confidence", 0.83, "checkedBy", "model")));
+        g.put("box", Map.of("x", 0.1, "y", 0.2, "w", 0.3, "h", 0.4));
+        g.put("position", null);
+        g.put("confidence", 0.91);
+        g.put("embedding", vector(3, 0.0));
+        JsonNode r = call("closet_save", Map.of("userId", user, "garments", List.of(g), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r.has("saved")).as(r.toString()).isTrue();
+        assertThat(r.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+    }
+
     /** 768차원 길이 1 벡터: axis 축에 cos, 그 옆 축에 sin(angle). */
     private static List<Double> vector(int axis, double angle) {
         var v = new ArrayList<Double>();

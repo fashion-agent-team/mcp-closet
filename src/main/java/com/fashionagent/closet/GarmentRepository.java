@@ -35,6 +35,29 @@ class GarmentRepository {
                 .list();
     }
 
+    /** 사진 벡터가 있는 내 옷(같은 종류, 같은 벡터 모델). 비교는 {@link ImageMatcher}가 자바에서 한다(보정 행렬 때문). */
+    record ImageRow(String id, float[] embedding, int count) {
+    }
+
+    List<ImageRow> imageRows(UUID userId, String category, String model) {
+        return jdbc.sql("""
+                        SELECT id, image_embedding::text AS v, image_count FROM closet.garments
+                         WHERE user_id = :userId AND category = :category AND image_model = :model AND image_embedding IS NOT NULL""")
+                .param("userId", userId).param("category", category).param("model", model)
+                .query((rs, i) -> new ImageRow(rs.getString("id"), Vectors.parse(rs.getString("v")), rs.getInt("image_count")))
+                .list();
+    }
+
+    /** 사진 벡터(평균)를 바꾼다. insert·update 다음에 부른다. */
+    void setImage(String id, UUID userId, String model, float[] embedding, int count) {
+        jdbc.sql("""
+                        UPDATE closet.garments SET image_embedding = CAST(:v AS public.vector), image_model = :model, image_count = :count
+                         WHERE id = :id AND user_id = :userId""")
+                .param("v", Vectors.literal(embedding)).param("model", model).param("count", count)
+                .param("id", id).param("userId", userId)
+                .update();
+    }
+
     int countByUser(UUID userId) {
         return jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = :userId").param("userId", userId)
                 .query(Integer.class).single();
@@ -60,13 +83,13 @@ class GarmentRepository {
         jdbc.sql("""
                         UPDATE closet.garments SET name = :name, color_name = :colorName, tone = :tone,
                                formality = CASE WHEN :formality = 'unknown' THEN formality ELSE :formality END,
-                               description = CAST(:description AS jsonb), embedding = CAST(:embedding AS public.vector),
+                               description = CAST(:description AS jsonb), embedding = COALESCE(CAST(:embedding AS public.vector), embedding),
                                last_seen_at = GREATEST(last_seen_at, :now), updated_at = :now
                          WHERE id = :id AND user_id = :userId""")
                 .param("id", id).param("userId", userId)
                 .param("name", g.name()).param("colorName", g.colorName()).param("tone", g.tone())
                 .param("formality", g.formality()).param("description", descriptionJson)
-                .param("embedding", Vectors.literal(embedding)).param("now", now)
+                .param("embedding", embedding == null ? null : Vectors.literal(embedding)).param("now", now)
                 .update();
     }
 

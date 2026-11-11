@@ -26,7 +26,8 @@ public record Garment(
         @ToolParam(required = false, description = "얼룩·찢어짐 등") List<Defect> defects,
         @ToolParam(required = false, description = "사진 속 위치(0~1)") Box box,
         @ToolParam(required = false, description = "left | center | right") String position,
-        @ToolParam(required = false, description = "0~1") Double confidence) {
+        @ToolParam(required = false, description = "0~1") Double confidence,
+        @ToolParam(required = false, description = "clothes_inspect가 준 옷 사진 벡터(768개). 그대로 넘기세요. 같은 옷 판단에 씀") List<Double> embedding) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Defect(String kind, String where, Double confidence) {
@@ -38,7 +39,7 @@ public record Garment(
 
     Garment withPattern(String p) {
         return new Garment(id, category, name, colorName, colorFamily, tone, p, material, notes, formality, defects, box,
-                position, confidence);
+                position, confidence, embedding);
     }
 
     static final Set<String> CATEGORIES = Set.of("top", "bottom", "outer", "dress", "shoes", "other");

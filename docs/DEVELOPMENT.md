@@ -11,7 +11,8 @@
 | `GarmentRepository` | `closet.garments`, `closet.wears` (JdbcClient, SQL은 data-model.md 3절) |
 | `CandidateFilter` | `occasion`·`apparentTemperature`로 맞지 않는 옷 빼기, 최근 입은 옷 감점 |
 | `GarmentNames` | 같은 옷인지 볼 때 이름 비교(니트=스웨터, 자켓=재킷 …) |
-| `SameGarment` | 같은 옷 후보라도 톤(light↔dark)·무늬가 다르면 다른 옷 |
+| `SameGarment` | (사진 벡터가 없을 때) 같은 옷 후보라도 톤(light↔dark)·무늬가 다르면 다른 옷 |
+| `ImageMatcher` | 옷 사진 벡터 두 개가 같은 옷인지(코사인, 보정 행렬이 있으면 바꾼 뒤), 평균 갱신 |
 | `style/StyleKnowledge` | 코디 지식 문서를 뜰 때 `closet.style_docs`에 맞춰 넣고, 검색 때 조각을 찾음 |
 | `embedding/E5OnnxEmbeddingModel` | multilingual-e5-small을 ONNX Runtime으로 돌림(평균 풀링 + 길이 1) |
 | `embedding/HashEmbeddingModel` | 모델 없이 띄울 때(테스트·개발). 뜻을 모름 |
@@ -27,6 +28,34 @@ RAG 나누기: 이 서버는 **검색**만 합니다. 찾은 옷 후보와 코�
 - 모델을 바꾸면 코디 지식은 뜰 때 다시 넣지만(`metadata.embeddingModel`), 옷 벡터(`garments.embedding`)는 그대로입니다. 모델을 바꾸면 옷 벡터도 다시 만들어야 합니다.
 
 ## 같은 옷 합치기
+
+### 사진 벡터로 (2026-11-11부터 기본)
+
+clothes_inspect(mcp-clothes-state PR #16)가 옷마다 `embedding`(Marqo FashionSigLIP, 768개, 길이 1)과 응답의 `embeddingModel`을 줍니다. agent가 둘을 closet_save에 그대로 넘기면:
+
+1. 같은 사람 + 같은 `category` + 같은 `image_model`인 옷의 `image_embedding`을 가져와 가장 가까운 옷을 찾습니다(`ImageMatcher`).
+2. 그 유사도가 기준(`closet.image.threshold` 0.89, 보정 행렬을 쓰면 `adapter-threshold` 0.43) 이상이면 합칩니다. 색 이름·색 계열·이름·톤은 보지 않습니다.
+3. 합치면 `image_embedding`을 지금까지 본 사진의 평균으로 바꿉니다(`image_count`, 10장부터는 새 사진 비중 1/10). 새 옷이면 그 벡터 그대로.
+4. 사진 벡터가 있는 입력은 사진 벡터가 없는 옛 옷과 비교하지 않습니다(옛 규칙이 틀리는 경우가 많아서). 한 번에 온 옷끼리 안 합치기와 `forceNewIds`는 그대로입니다.
+
+왜 바꿨나(DeepFashion In-shop 표본, 비상업 연구용이라 레포에 넣지 않음. 결과 문서는 팀 공유):
+
+| 옷 30벌 옷장 흉내, 새 옷 잘못 합침 5%에 맞춘 기준 | 같은 옷 맞게 합침 | 엉뚱한 옷에 합침 |
+| --- | --- | --- |
+| 글 설명 규칙(예전) | 36% | 39% (새 옷 잘못 합침 52%) |
+| FashionSigLIP, 처음 본 사진 하나 | 58% | 3.0% |
+| FashionSigLIP, 본 사진 평균 (지금 방식) | 73% | 2.2% |
+| + 보정 행렬, 본 사진 평균 | 85% | 0.4% |
+
+- 이미지 모델 12개를 비교해서 FashionSigLIP이 가장 좋았습니다(SigLIP, SigLIP2, FashionCLIP, Jina CLIP 순, DINOv2·CLIP B 계열은 26~45%).
+- 위 숫자는 clothes_inspect 서버가 실제로 돌려준 벡터(옷 600벌, 학습에 안 쓴 옷)로 다시 잰 값입니다. 같은 옷 두 장을 옷장에 넣고 세 번째 사진으로 찾습니다.
+- 기준값: 위 5%에 맞춘 값이 0.886 / 0.424라서 0.89 / 0.43으로 둡니다(새 옷 잘못 합침 4.1% / 약 5%).
+- 톤(밝음↔어두움) 충돌 규칙을 더하면 맞게 합침이 2~4%p 줄기만 해서 사진 쪽에는 쓰지 않습니다.
+- 스튜디오 사진(224px)이라 실제 폰 사진에서는 낮을 수 있습니다. 팀원 옷 20벌쯤으로 다시 재야 합니다.
+
+**보정 행렬(WCCN)**: 같은 옷 사진끼리의 차이(조명·각도) 방향을 줄이는 768×768 행렬입니다. DeepFashion 다른 옷 1,400벌로 만들어서 **비상업 연구용 데이터에서 나온 것**이라 레포와 Docker 이미지에 넣지 않고, 학교 프로젝트 시연 때만 `CLOSET_IMAGE_ADAPTER`로 파일을 줍니다. 파일은 float32 리틀 엔디언 `mu`(768개) 다음 `W`(768×768, 행 우선), 계산은 `(v − mu)·W`를 길이 1로. 크기가 틀리면 서버가 뜨지 않습니다(기준이 조용히 어긋나지 않게).
+
+### 사진 벡터가 없을 때 (예전 규칙)
 
 조건: 같은 사람 + 같은 `category` + 같은 `colorFamily` + 유사도 0.90 이상 + 이름이 같은 묶음(`GarmentNames`). 합치면 `description`, `embedding`, 이름·색 이름·톤을 마지막 것으로 바꾸고 `last_seen_at`을 올립니다.
 

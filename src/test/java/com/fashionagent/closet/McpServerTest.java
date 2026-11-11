@@ -142,6 +142,67 @@ class McpServerTest {
     }
 
     @Test
+    @DisplayName("사진 벡터가 있으면 사진으로 판단: 색 판별이 달라도 같은 옷은 합치고, 같은 색 흰 티셔츠라도 사진이 다르면 새 옷")
+    void imageMatch() {
+        List<Double> shirtA = vector(1, 0.0);
+        // 같은 셔츠를 다른 날 찍음: 벡터는 조금 다르고(코사인 약 0.95) clothes_inspect가 색을 베이지로 봄
+        List<Double> shirtA2 = vector(1, 0.33);
+        List<Double> shirtB = vector(2, 0.0);   // 다른 흰 티셔츠(코사인 0)
+
+        var first = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        first.put("embedding", shirtA);
+        JsonNode r1 = call("closet_save", Map.of("userId", user, "garments", List.of(first), "embeddingModel", "marqo-fashionSigLIP"));
+        String a = r1.get("saved").get(0).get("garmentId").asString();
+
+        var again = garment("g1", "top", "티셔츠", "베이지", "beige", "mid", "casual", "면");
+        again.put("embedding", shirtA2);
+        JsonNode r2 = call("closet_save", Map.of("userId", user, "garments", List.of(again), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r2.get("saved").get(0).get("garmentId").asString()).isEqualTo(a);
+        assertThat(r2.get("saved").get(0).get("isNew").asBoolean()).isFalse();
+        assertThat(jdbc.sql("SELECT image_count FROM closet.garments WHERE id = :id").param("id", a).query(Integer.class).single())
+                .isEqualTo(2);
+        // 사진 벡터는 description(jsonb)에 넣지 않는다
+        assertThat(jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", a).query(String.class).single())
+                .doesNotContain("embedding");
+
+        var other = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        other.put("embedding", shirtB);
+        JsonNode r3 = call("closet_save", Map.of("userId", user, "garments", List.of(other), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r3.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+
+        // 모델 이름이 다르면 비교하지 않는다(새 옷)
+        var otherModel = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        otherModel.put("embedding", shirtA);
+        JsonNode r4 = call("closet_save", Map.of("userId", user, "garments", List.of(otherModel), "embeddingModel", "other-model"));
+        assertThat(r4.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+
+        // forceNewIds는 사진이 같아도 새 옷
+        var forced = garment("g9", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
+        forced.put("embedding", shirtA);
+        JsonNode r5 = call("closet_save", Map.of("userId", user, "garments", List.of(forced), "embeddingModel", "marqo-fashionSigLIP",
+                "forceNewIds", List.of("g9")));
+        assertThat(r5.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+
+        // 길이가 틀린 벡터는 무시하고 예전 규칙으로 저장(오류 아님)
+        var bad = garment("g1", "bottom", "청바지", "파란색", "blue", "mid", "casual", "데님");
+        bad.put("embedding", List.of(0.1, 0.2));
+        JsonNode r6 = call("closet_save", Map.of("userId", user, "garments", List.of(bad), "embeddingModel", "marqo-fashionSigLIP"));
+        assertThat(r6.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+        String jeans = r6.get("saved").get(0).get("garmentId").asString();
+        assertThat(jdbc.sql("SELECT image_model FROM closet.garments WHERE id = :id").param("id", jeans).query(String.class).optional())
+                .isEmpty();
+    }
+
+    /** 768차원 길이 1 벡터: axis 축에 cos, 그 옆 축에 sin(angle). */
+    private static List<Double> vector(int axis, double angle) {
+        var v = new ArrayList<Double>();
+        for (int i = 0; i < 768; i++) {
+            v.add(i == axis ? Math.cos(angle) : i == axis + 100 ? Math.sin(angle) : 0.0);
+        }
+        return v;
+    }
+
+    @Test
     @DisplayName("같은 색 니트 두 벌: 한 번에 넘기면 두 벌, forceNewIds면 비슷해도 새 옷")
     void twoSameColorKnits() {
         var knit = garment("g1", "top", "니트", "차콜 그레이", "gray", "dark", "smart", "니트 같음");

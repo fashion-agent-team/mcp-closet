@@ -36,6 +36,10 @@ spring:
 
 closet:
   same-garment-threshold: ${CLOSET_SAME_GARMENT_THRESHOLD:0.90}
+  image:
+    threshold: ${CLOSET_IMAGE_THRESHOLD:0.89}
+    adapter-path: ${CLOSET_IMAGE_ADAPTER:}
+    adapter-threshold: ${CLOSET_IMAGE_ADAPTER_THRESHOLD:0.43}
   embedding:
     provider: ${CLOSET_EMBEDDING_PROVIDER:onnx}
     model-uri: ${CLOSET_EMBEDDING_MODEL_URI:https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model_quantized.onnx}

@@ -43,13 +43,15 @@ public class ClosetTools {
     @Tool(name = "closet_save", description = """
             옷 추천을 마칠 때("이걸로 할게") 2단계에서 clothes_inspect로 본 옷들을 옷장에 기록합니다. 사진은 저장하지 않습니다. \
             이미 있는 옷이면 새로 만들지 않고 합칩니다(isNew=false). 한 번에 넘긴 옷끼리는 합치지 않습니다. \
+            clothes_inspect가 준 garments[].embedding(옷 사진 벡터)과 embeddingModel을 그대로 넘기면 사진으로 같은 옷을 판단해서 훨씬 정확합니다. \
             합쳤는데 사용자가 "그건 다른 옷이에요"라고 하면 그 옷의 id를 forceNewIds에 넣어 다시 부르세요. \
             돌려준 garmentId로 closet_wear를 부르세요.""")
     public Object closetSave(
             @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
             @ToolParam(description = "clothes_inspect가 돌려준 Garment 목록(최대 20벌)") List<Garment> garments,
-            @ToolParam(required = false, description = "비슷해도 새 옷으로 저장할 Garment.id 목록. 예: g2") List<String> forceNewIds) {
-        return run(() -> service.save(Ids.userId(userId), garments, forceNewIds));
+            @ToolParam(required = false, description = "비슷해도 새 옷으로 저장할 Garment.id 목록. 예: g2") List<String> forceNewIds,
+            @ToolParam(required = false, description = "clothes_inspect 응답의 embeddingModel. 예: marqo-fashionSigLIP. 없으면 embedding을 쓰지 않음") String embeddingModel) {
+        return run(() -> service.save(Ids.userId(userId), garments, forceNewIds, embeddingModel));
     }
 
     @Tool(name = "closet_wear", description = """

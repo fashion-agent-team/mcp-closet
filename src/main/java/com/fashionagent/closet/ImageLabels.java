@@ -31,6 +31,22 @@ public class ImageLabels {
     public record Guess(String name, String pattern, String formality) {
     }
 
+    /** clothes_inspect 이름 → 바꿔도 되는 더 자세한 이름(표의 ko). 표에 없는 이름(옷·겉옷·상의 등)은 제한 없음. */
+    static final Map<String, java.util.Set<String>> FAMILY = Map.ofEntries(
+            Map.entry("티셔츠", java.util.Set.of("티셔츠", "프린트 티셔츠", "민소매", "폴로 셔츠", "맨투맨")),
+            Map.entry("셔츠", java.util.Set.of("셔츠", "블라우스", "폴로 셔츠")),
+            Map.entry("니트", java.util.Set.of("니트", "맨투맨", "후드티")),
+            Map.entry("가디건", java.util.Set.of("카디건")),
+            Map.entry("카디건", java.util.Set.of("카디건")),
+            Map.entry("자켓", java.util.Set.of("자켓", "정장 자켓")),
+            Map.entry("재킷", java.util.Set.of("자켓", "정장 자켓")),
+            Map.entry("코트", java.util.Set.of("코트")),
+            Map.entry("조끼", java.util.Set.of("조끼")),
+            Map.entry("바지", java.util.Set.of("바지", "청바지", "슬랙스", "레깅스")),
+            Map.entry("반바지", java.util.Set.of("반바지")),
+            Map.entry("치마", java.util.Set.of("치마")),
+            Map.entry("원피스", java.util.Set.of("원피스", "점프수트")));
+
     private final String model;
     private final List<Label> names = new ArrayList<>();
     private final List<Label> patterns = new ArrayList<>();
@@ -69,10 +85,22 @@ public class ImageLabels {
      * @param category clothes_inspect가 정한 종류. 그 종류에 맞는 이름 중에서만 고른다(바지를 셔츠라고 하지 않게)
      */
     public Guess guess(float[] v, String category) {
+        return guess(v, category, null);
+    }
+
+    /**
+     * clothes_inspect가 이미 구체적인 이름(자켓·바지 등)을 줬으면 그 이름을 더 자세히 하는 쪽(바지 → 청바지·슬랙스)으로만 고른다.
+     * 2026-11-12 시뮬에서 자켓을 조끼로, 패딩을 카디건으로 바꿔 틀렸음. "옷"·"겉옷"처럼 넓은 이름이면 종류 안에서 다 고른다.
+     */
+    public Guess guess(float[] v, String category, String inspectName) {
+        java.util.Set<String> family = inspectName == null ? null : FAMILY.get(inspectName.strip());
         Label best = null;
         double bs = -2;
         for (Label l : names) {
             if (!l.categories().contains(category)) {
+                continue;
+            }
+            if (family != null && !family.contains(l.ko())) {
                 continue;
             }
             double s = Vectors.dot(v, l.vector());

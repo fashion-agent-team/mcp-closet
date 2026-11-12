@@ -56,4 +56,18 @@ class ImageLabelsTest {
         float[] plain = vectorOf("names", "티셔츠");
         assertThat(labels.guess(plain, "top").pattern()).isNull();
     }
+
+    @Test
+    @DisplayName("clothes_inspect가 자켓이라 했으면 사진이 조끼 같아도 자켓 계열에서만 고른다")
+    void staysInFamily() throws Exception {
+        float[] vest = vectorOf("names", "조끼");
+        assertThat(labels.guess(vest, "outer").name()).isEqualTo("조끼");
+        assertThat(labels.guess(vest, "outer", "자켓").name()).isIn("자켓", "정장 자켓");
+        assertThat(labels.guess(vectorOf("names", "카디건"), "outer", "코트").name()).isEqualTo("코트");
+        // 바지는 청바지·슬랙스로 더 자세히 할 수 있다
+        assertThat(labels.guess(vectorOf("names", "청바지"), "bottom", "바지").name()).isEqualTo("청바지");
+        // 넓은 이름(겉옷·옷)이면 종류 안에서 다 고른다
+        assertThat(labels.guess(vest, "outer", "겉옷").name()).isEqualTo("조끼");
+        assertThat(labels.guess(vest, "outer", null).name()).isEqualTo("조끼");
+    }
 }

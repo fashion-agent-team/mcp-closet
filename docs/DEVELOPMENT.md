@@ -220,3 +220,14 @@ agent가 `imageQuery`에 찾는 옷을 짧은 영어로 주면(예: `warm winter
 - `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.
 - `E5OnnxEmbeddingModelTest`: `CLOSET_E5_DIR`(model.onnx, tokenizer.json)이 있을 때만.
 - 나머지는 순수 단위 테스트. 모두 26개(실제 e5 3개 포함).
+
+## 애매할 때 GPT로 한 번 더 보기 (2026-11-12)
+
+모델이 확실할 때는 모델만으로 정하고, 애매할 때만 agent가 GPT에게 사진 두 장을 보여 줍니다(박창근 결정: "정확도가 떨어지거나 인식이 안 되면 GPT로 인식률을 높인다", 옷 부분 작은 사진은 우리 DB에만 저장).
+
+- **확실함:** 사진 유사도 ≥ 기준(CC0 보정 0.60) → 바로 합침. < 기준 − 0.10(0.50) → 새 옷.
+- **애매함:** 그 사이면 새 옷으로 저장하고 `saved[].maybeSameAs`에 가장 가까운 옷(garmentId·이름·색·무늬·소재·작은 사진·유사도)을 줍니다.
+- **인식 실패:** 사진 벡터가 없고 글 규칙으로도 합쳐지지 않았는데 작은 사진이 왔으면, 글로 가장 가까운 같은 종류·색 계열 옷을 `maybeSameAs`로 줍니다.
+- agent는 이번 옷 사진과 `maybeSameAs.thumbnail`을 GPT에게 보여 같은 옷이면 `closet_merge(garmentId=새 옷, intoGarmentId=maybeSameAs.garmentId)`를 부릅니다. 옷장 서버는 GPT를 부르지 않습니다(API 키 없음).
+- `closet_merge`: 입은 날을 옮기고(같은 날은 하나), 사진 벡터는 사진 수로 가중 평균, 설명·작은 사진은 더 최근 것, 처음 본 날은 더 이른 것을 남기고 garmentId를 지웁니다. 종류가 다르면 거절합니다.
+- 작은 사진: `garments.thumbnail`(bytea, V3), JPEG만, 48KB 넘으면 저장하지 않음(오류 아님). description(jsonb)에는 넣지 않습니다.

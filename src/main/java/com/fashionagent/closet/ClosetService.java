@@ -50,7 +50,19 @@ public class ClosetService {
         this.clock = clock;
     }
 
-    public record Saved(String inputId, String garmentId, boolean isNew) {
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record Saved(String inputId, String garmentId, boolean isNew, MaybeSame maybeSameAs) {
+        Saved(String inputId, String garmentId, boolean isNew) {
+            this(inputId, garmentId, isNew, null);
+        }
+    }
+
+    /**
+     * 사진 유사도가 기준 바로 아래(애매함)라 새 옷으로 저장했지만 같은 옷일 수도 있는 기존 옷.
+     * agent가 GPT로 이번 사진과 이 설명을 비교해 같은 옷이면 closet_merge(garmentId=새 옷, intoGarmentId=이 옷)를 부른다.
+     */
+    public record MaybeSame(String garmentId, String name, String colorName, String pattern, String material,
+                            String thumbnail, double similarity) {
     }
 
     /** closet_save. 같은 옷이면 새로 만들지 않고 합친다. */
@@ -119,6 +131,8 @@ public class ClosetService {
             boolean force = g.id() != null && forceNew.contains(g.id().trim());
 
             String matchId = null;
+            String maybeId = null;
+            double maybeSim = 0;
             String keptPattern = null;
             GarmentRepository.ImageRow matchRow = null;
             if (img != null) {
@@ -139,18 +153,27 @@ public class ClosetService {
                     if (matchRow != null && best >= images.threshold()) {
                         matchId = matchRow.id();
                     } else {
+                        if (matchRow != null && best >= images.uncertainBelow()) {
+                            maybeId = matchRow.id();
+                            maybeSim = best;
+                        }
                         matchRow = null;
                     }
                 }
             } else if (v != null && !force) {
-                var same = garments.nearestSame(userId, n.category(), n.colorFamily(), v, 5).stream()
-                        .filter(m -> !taken.contains(m.id()))
+                var near = garments.nearestSame(userId, n.category(), n.colorFamily(), v, 5).stream()
+                        .filter(m -> !taken.contains(m.id())).toList();
+                var same = near.stream()
                         .filter(m -> m.similarity() >= props.sameGarmentThreshold() && GarmentNames.sameKind(m.name(), n.name()))
                         .filter(m -> !SameGarment.conflicts(n.tone(), n.pattern(), m.tone(), m.pattern()))
                         .findFirst();
                 if (same.isPresent()) {
                     matchId = same.get().id();
                     keptPattern = same.get().pattern();
+                } else if (thumbnail(g.thumbnail()) != null && !near.isEmpty()) {
+                    // 사진 벡터가 없으면(인식 실패) 글로 가장 가까운 같은 종류·색 계열 옷을 알려 GPT가 사진으로 확인하게 한다
+                    maybeId = near.get(0).id();
+                    maybeSim = near.get(0).similarity();
                 }
             }
 
@@ -158,6 +181,7 @@ public class ClosetService {
                 // 이번 사진에서 무늬를 못 봤으면 전에 본 무늬를 남긴다(다음에 다른 무늬 옷과 가를 수 있게)
                 Garment kept = (g.pattern() == null || g.pattern().isBlank()) && keptPattern != null ? g.withPattern(keptPattern) : g;
                 garments.update(matchId, userId, n, describe(kept, matchId, guess), v, now);
+                garments.setThumbnail(matchId, userId, thumbnail(g.thumbnail()), now);
                 if (img != null) {
                     int max = props.image().maxCount();
                     garments.setImage(matchId, userId, model, ImageMatcher.mean(matchRow.embedding(), matchRow.count(), img, max),
@@ -172,12 +196,16 @@ public class ClosetService {
             }
             String id = Ids.garmentId();
             garments.insert(id, userId, n, describe(g, id, guess), v, now);
+            garments.setThumbnail(id, userId, thumbnail(g.thumbnail()), now);
             if (img != null) {
                 garments.setImage(id, userId, model, img, 1);
             }
             taken.add(id);
             size++;
-            saved.add(new Saved(g.id(), id, true));
+            final double sim = Math.round(maybeSim * 1000) / 1000.0;
+            saved.add(new Saved(g.id(), id, true, maybeId == null ? null : garments.brief(userId, maybeId)
+                    .map(x -> new MaybeSame(x.id(), x.name(), x.colorName(), x.pattern(), x.material(), x.thumbnail(), sim))
+                    .orElse(null)));
         }
         return Map.of("saved", saved);
     }
@@ -192,10 +220,30 @@ public class ClosetService {
         }
     }
 
-    /** description(jsonb)에는 받은 Garment 전체를 두되 id는 옷장 id로 바꾸고, 사진 벡터(숫자 768개)는 따로 두므로 뺀다. */
+    /** 옷 작은 사진(base64 JPEG). 모양이 틀리거나 크면 저장하지 않는다(오류 아님, 사진 없이 저장). */
+    static byte[] thumbnail(String base64) {
+        if (base64 == null || base64.isBlank()) {
+            return null;
+        }
+        String s = base64.trim();
+        int comma = s.indexOf(',');
+        if (s.startsWith("data:") && comma > 0) {
+            s = s.substring(comma + 1);
+        }
+        byte[] b;
+        try {
+            b = java.util.Base64.getMimeDecoder().decode(s);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        boolean jpeg = b.length > 3 && (b[0] & 0xff) == 0xff && (b[1] & 0xff) == 0xd8;
+        return jpeg && b.length <= 49_152 ? b : null;
+    }
+
+    /** description(jsonb)에는 받은 Garment 전체를 두되 id는 옷장 id로 바꾸고, 사진 벡터(숫자 768개)·작은 사진은 따로 두므로 뺀다. */
     private String describe(Garment g, String garmentId, ImageLabels.Guess guess) {
         Garment copy = new Garment(garmentId, g.category(), g.name(), g.colorName(), g.colorFamily(), g.tone(), g.pattern(),
-                g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence(), null);
+                g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence(), null, null);
         if (guess == null) {
             return json.writeValueAsString(copy);
         }
@@ -433,6 +481,41 @@ public class ClosetService {
             throw ClosetException.notFound("옷장에 없는 옷이에요: " + String.join(", ", missing));
         }
         return Map.of("removed", garments.delete(userId, ids));
+    }
+
+    /**
+     * closet_merge. 따로 저장된 두 옷이 같은 옷일 때 garmentId를 intoGarmentId에 합친다: 입은 날을 옮기고, 사진 벡터는 사진 수로
+     * 가중 평균하고, 설명은 더 최근에 본 쪽을 남긴 뒤 garmentId를 지운다. 종류가 다르면 합치지 않는다.
+     */
+    @Transactional
+    public Map<String, Object> merge(UUID userId, String garmentId, String intoGarmentId) {
+        if (garmentId == null || garmentId.isBlank() || intoGarmentId == null || intoGarmentId.isBlank()) {
+            throw ClosetException.badRequest("garmentId와 intoGarmentId가 필요해요.");
+        }
+        String from = garmentId.trim();
+        String into = intoGarmentId.trim();
+        if (from.equals(into)) {
+            throw ClosetException.badRequest("같은 옷끼리는 합칠 수 없어요.");
+        }
+        var a = garments.mergeRow(userId, from);
+        var b = garments.mergeRow(userId, into);
+        if (a.isEmpty() || b.isEmpty()) {
+            throw ClosetException.notFound("옷장에 없는 옷이에요: " + (a.isEmpty() ? from : into));
+        }
+        if (!a.get().category().equals(b.get().category())) {
+            throw ClosetException.badRequest("종류가 다른 옷은 합칠 수 없어요.");
+        }
+        var f = a.get();
+        var t = b.get();
+        if (f.image() != null && t.image() != null && f.model().equals(t.model())) {
+            int max = props.image().maxCount();
+            garments.setImage(into, userId, t.model(), ImageMatcher.combine(t.image(), t.count(), f.image(), f.count(), max),
+                    Math.min(t.count() + f.count(), max));
+        } else if (f.image() != null && t.image() == null) {
+            garments.setImage(into, userId, f.model(), f.image(), f.count());
+        }
+        garments.mergeInto(userId, from, into);
+        return Map.of("merged", from, "into", into);
     }
 
     private static LocalDate parseDay(String value, String field) {

@@ -67,7 +67,7 @@ class McpServerTest {
     void toolsList() {
         var tools = client.listTools().tools();
         assertThat(tools).extracting(McpSchema.Tool::name)
-                .containsExactlyInAnyOrder("closet_search", "closet_save", "closet_wear", "closet_outfits", "closet_list", "closet_remove");
+                .containsExactlyInAnyOrder("closet_search", "closet_save", "closet_wear", "closet_outfits", "closet_list", "closet_remove", "closet_merge");
         var outfits = tools.stream().filter(t -> t.name().equals("closet_outfits")).findFirst().orElseThrow();
         assertThat((List<String>) outfits.inputSchema().get("required")).containsExactly("userId");
         var search = tools.stream().filter(t -> t.name().equals("closet_search")).findFirst().orElseThrow();
@@ -194,6 +194,57 @@ class McpServerTest {
         String jeans = r6.get("saved").get(0).get("garmentId").asString();
         assertThat(jdbc.sql("SELECT image_model FROM closet.garments WHERE id = :id").param("id", jeans).query(String.class).optional())
                 .isEmpty();
+    }
+
+    @Test
+    @DisplayName("사진이 애매하게 비슷하면 새 옷으로 저장하고 maybeSameAs(예전 작은 사진 포함)를 주며, closet_merge로 합친다")
+    void maybeSameAndMerge() {
+        String jpeg = java.util.Base64.getEncoder().encodeToString(new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1, 2, 3});
+        var first = garment("g1", "outer", "코트", "검정", "black", "dark", "smart", "울");
+        first.put("embedding", vector(5, 0.0));
+        first.put("thumbnail", jpeg);
+        JsonNode r1 = call("closet_save", Map.of("userId", user, "garments", List.of(first), "embeddingModel", "marqo-fashionSigLIP"));
+        String coat = r1.get("saved").get(0).get("garmentId").asString();
+        assertThat(r1.get("saved").get(0).has("maybeSameAs")).isFalse();
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(coat), "date", "2026-11-01"));
+
+        // 보정 없음(테스트 설정): 기준 0.89, 애매함 0.79~0.89. 코사인 0.84
+        var again = garment("g1", "outer", "코트", "차콜", "gray", "dark", "smart", "울");
+        again.put("embedding", vector(5, Math.acos(0.84)));
+        JsonNode r2 = call("closet_save", Map.of("userId", user, "garments", List.of(again), "embeddingModel", "marqo-fashionSigLIP"));
+        JsonNode s2 = r2.get("saved").get(0);
+        assertThat(s2.get("isNew").asBoolean()).isTrue();
+        assertThat(s2.get("maybeSameAs").get("garmentId").asString()).isEqualTo(coat);
+        assertThat(s2.get("maybeSameAs").get("thumbnail").asString()).isEqualTo(jpeg);
+        assertThat(s2.get("maybeSameAs").get("similarity").asDouble()).isBetween(0.83, 0.85);
+        String dup = s2.get("garmentId").asString();
+        // 작은 사진은 description(jsonb)에 넣지 않는다
+        assertThat(jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", coat).query(String.class).single())
+                .doesNotContain("thumbnail");
+
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(dup), "date", "2026-11-02"));
+        JsonNode m = call("closet_merge", Map.of("userId", user, "garmentId", dup, "intoGarmentId", coat));
+        assertThat(m.get("into").asString()).isEqualTo(coat);
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.garments WHERE id = :id").param("id", dup).query(Integer.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT image_count FROM closet.garments WHERE id = :id").param("id", coat).query(Integer.class).single())
+                .isEqualTo(2);
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.wears WHERE garment_id = :id").param("id", coat).query(Integer.class).single())
+                .isEqualTo(2);
+        assertThat(jdbc.sql("SELECT color_name FROM closet.garments WHERE id = :id").param("id", coat).query(String.class).single())
+                .isEqualTo("차콜");
+
+        // 사진 벡터가 없으면(인식 실패) 글로 가장 가까운 같은 종류·색 옷을 maybeSameAs로 준다(작은 사진이 있을 때)
+        var noVec = garment("g1", "outer", "점퍼", "검정", "black", "dark", "casual", "나일론");
+        noVec.put("thumbnail", jpeg);
+        JsonNode r3 = call("closet_save", Map.of("userId", user, "garments", List.of(noVec)));
+        assertThat(r3.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+        assertThat(r3.get("saved").get(0).get("maybeSameAs").get("garmentId").asString()).isEqualTo(coat);
+
+        // 종류가 다르면 합치지 않는다
+        var pants = garment("g1", "bottom", "슬랙스", "검정", "black", "dark", "smart", "울");
+        String p = call("closet_save", Map.of("userId", user, "garments", List.of(pants))).get("saved").get(0).get("garmentId").asString();
+        assertThat(call("closet_merge", Map.of("userId", user, "garmentId", p, "intoGarmentId", coat)).get("error").get("code").asString())
+                .isEqualTo("bad_request");
     }
 
     @Test

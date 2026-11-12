@@ -41,6 +41,8 @@ closet:
     # 기본: CC0 옷 사진으로 만든 보정 행렬(jar 안). 끄려면 CLOSET_IMAGE_ADAPTER= (빈 값), 그때 기준은 threshold(0.89)
     adapter-path: ${CLOSET_IMAGE_ADAPTER:classpath:image-adapter/fsiglip-cc0-aug.bin}
     adapter-threshold: ${CLOSET_IMAGE_ADAPTER_THRESHOLD:0.60}
+    # 기준보다 이만큼 아래까지는 애매함 → closet_save가 maybeSameAs로 알려 agent가 GPT로 확인(closet_merge)
+    uncertain-margin: ${CLOSET_IMAGE_UNCERTAIN_MARGIN:0.10}
     # closet_search imageQuery(영어)용 FashionSigLIP 글 모델(int8 ONNX ~111MB). 비우면 imageQuery를 무시
     text:
       model-uri: ${CLOSET_IMAGE_TEXT_MODEL_URI:}

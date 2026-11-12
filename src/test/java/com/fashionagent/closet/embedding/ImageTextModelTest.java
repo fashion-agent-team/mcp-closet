@@ -16,7 +16,7 @@ class ImageTextModelTest {
         return new ClosetProperties(0.90, 20, 500, 8, 20, 3,
                 new ClosetProperties.Embedding("hash", "", "", "models", 256, Duration.ofMinutes(1)),
                 new ClosetProperties.Image(0.89, "", 0.68, 768, 10,
-                        new ClosetProperties.Text(model, tokenizer, "marqo-fashionSigLIP", 1.5)));
+                        new ClosetProperties.Text(model, tokenizer, "marqo-fashionSigLIP", 1.5), 0.10));
     }
 
     @Test

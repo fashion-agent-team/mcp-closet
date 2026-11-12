@@ -27,6 +27,7 @@ public class ImageMatcher {
     private final float[] mu;
     private final float[][] w;
     private final double threshold;
+    private final double uncertainBelow;
 
     public ImageMatcher(ClosetProperties props) {
         var p = props.image();
@@ -42,6 +43,7 @@ public class ImageMatcher {
             this.threshold = p.adapterThreshold();
             log.info("옷 사진 보정 행렬을 씁니다({}), 기준 {}", p.adapterPath(), threshold);
         }
+        this.uncertainBelow = threshold - Math.max(0, p.uncertainMargin());
     }
 
     public int dimensions() {
@@ -50,6 +52,21 @@ public class ImageMatcher {
 
     public double threshold() {
         return threshold;
+    }
+
+    /** 이 값 이상 기준 미만이면 애매함(새 옷으로 저장하되 maybeSameAs로 알림). */
+    public double uncertainBelow() {
+        return uncertainBelow;
+    }
+
+    /** 두 옷을 합칠 때 사진 평균끼리 사진 수로 가중 평균. */
+    static float[] combine(float[] a, int ca, float[] b, int cb, int maxCount) {
+        float[] out = new float[a.length];
+        double wa = Math.max(1, ca), wb = Math.max(1, cb);
+        for (int i = 0; i < a.length; i++) {
+            out[i] = (float) ((a[i] * wa + b[i] * wb) / (wa + wb));
+        }
+        return out;
     }
 
     public boolean adapted() {

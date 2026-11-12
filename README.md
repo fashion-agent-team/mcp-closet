@@ -20,12 +20,13 @@
 | `closet_outfits` | 예전에 입은 조합(같은 날 입은 옷을 한 벌로). "지난번 면접 때 뭐 입었지?" |
 | `closet_list` | 옷장 목록(종류 순, 입은 횟수). "내 옷장에 뭐 있어?" |
 | `closet_remove` | 옷 지우기(버린 옷, 잘못 저장된 옷). 입은 날 기록도 함께 지움 |
+| `closet_merge` | 따로 저장된 두 옷을 한 벌로 합치기. closet_save의 `maybeSameAs`(사진이 애매하게 비슷함)를 agent가 GPT로 두 사진을 비교해 같은 옷이라고 하면 부름. 사용자가 "그거 같은 옷이에요"라고 할 때도 |
 
 입출력 JSON은 [MCP 도구 입출력](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/mcp-tools.md)를 그대로 따릅니다.
 
 ## 이 레포가 지킬 것
 
-- 옷 설명은 `clothes_inspect`가 준 Garment JSON을 그대로 JSONB로 저장합니다. **사진은 저장하지 않습니다.**
+- 옷 설명은 `clothes_inspect`가 준 Garment JSON을 그대로 JSONB로 저장합니다. 원본 사진은 저장하지 않고, **옷 부분만 자른 작은 사진**(`thumbnail`, 긴 변 256px JPEG, 얼굴 없음, 48KB 이하)만 우리 DB에 둡니다(2026-11-12 결정). 애매할 때 GPT가 같은 옷인지 사진끼리 비교하는 데만 쓰고, 옷을 지우면 함께 지워집니다.
 - 코디 지식 문서(`style_docs`: 드레스코드, 색 조합, 날씨별 옷차림)는 우리가 직접 씁니다.
 - 옷장이 비면 `empty: true`를 돌려주고 agent가 "옷 확인을 몇 번 하면 옷장이 채워져요"라고 안내합니다.
 - DB 스키마 `closet`만 씁니다(`garments`, `wears`, `style_docs`).
@@ -76,6 +77,7 @@ docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Huggi
 | `CLOSET_IMAGE_ADAPTER` | jar 안 CC0 보정 행렬 | 사진 보정 행렬(WCCN). 파일 경로를 주면 그것을, 빈 값이면 보정 없이 |
 | `CLOSET_IMAGE_ADAPTER_THRESHOLD` | `0.60` | 보정 행렬을 쓸 때 같은 옷이라고 보는 유사도(행렬마다 다름, docs/DEVELOPMENT.md) |
 | `CLOSET_IMAGE_THRESHOLD` | `0.89` | 보정 없이 쓸 때의 기준 |
+| `CLOSET_IMAGE_UNCERTAIN_MARGIN` | `0.10` | 기준보다 이만큼 아래까지는 애매함: 새 옷으로 저장하되 `maybeSameAs`로 가장 가까운 옷(작은 사진 포함)을 알려 agent가 GPT로 확인 |
 
 API 키는 필요 없습니다(임베딩은 서버 CPU에서 돌고, GPT는 agent가 부릅니다). 만든 방식과 잰 숫자는 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)에 있습니다.
 

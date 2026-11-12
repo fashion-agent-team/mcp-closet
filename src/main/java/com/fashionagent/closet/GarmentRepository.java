@@ -209,6 +209,75 @@ class GarmentRepository {
                 .param("userId", userId).param("category", category).query(Integer.class).single();
     }
 
+    record Brief(String id, String name, String colorName, String pattern, String material, String thumbnail) {
+    }
+
+    /** 작은 사진을 최근 것으로 바꾼다. null이면 그대로 둔다. */
+    void setThumbnail(String id, UUID userId, byte[] jpeg, OffsetDateTime now) {
+        if (jpeg == null) {
+            return;
+        }
+        jdbc.sql("UPDATE closet.garments SET thumbnail = :t, thumbnail_at = :now WHERE id = :id AND user_id = :userId")
+                .param("t", jpeg).param("now", now).param("id", id).param("userId", userId).update();
+    }
+
+    java.util.Optional<Brief> brief(UUID userId, String id) {
+        return jdbc.sql("""
+                        SELECT id, name, color_name, description ->> 'pattern' AS pattern, description ->> 'material' AS material,
+                               thumbnail
+                          FROM closet.garments WHERE user_id = :userId AND id = :id""")
+                .param("userId", userId).param("id", id)
+                .query((rs, i) -> new Brief(rs.getString("id"), rs.getString("name"), rs.getString("color_name"),
+                        rs.getString("pattern"), rs.getString("material"),
+                        rs.getBytes("thumbnail") == null ? null : java.util.Base64.getEncoder().encodeToString(rs.getBytes("thumbnail"))))
+                .optional();
+    }
+
+    record MergeRow(String id, String category, float[] image, String model, int count) {
+    }
+
+    java.util.Optional<MergeRow> mergeRow(UUID userId, String id) {
+        return jdbc.sql("""
+                        SELECT id, category, image_embedding::text AS v, image_model, image_count
+                          FROM closet.garments WHERE user_id = :userId AND id = :id""")
+                .param("userId", userId).param("id", id)
+                .query((rs, i) -> new MergeRow(rs.getString("id"), rs.getString("category"),
+                        rs.getString("v") == null ? null : Vectors.parse(rs.getString("v")), rs.getString("image_model"),
+                        rs.getInt("image_count")))
+                .optional();
+    }
+
+    /**
+     * from을 into에 합친다(사진 벡터는 부르는 쪽이 먼저 정함): 입은 날을 옮기고(같은 날은 하나만), 설명·글 임베딩은 더 최근에 본 쪽(같으면 from),
+     * 처음 본 날은 더 이른 쪽으로 둔 뒤 from을 지운다.
+     */
+    void mergeInto(UUID userId, String from, String into) {
+        jdbc.sql("""
+                        UPDATE closet.wears SET garment_id = :into, updated_at = now()
+                         WHERE user_id = :userId AND garment_id = :from
+                           AND worn_on NOT IN (SELECT worn_on FROM closet.wears WHERE garment_id = :into)""")
+                .param("userId", userId).param("from", from).param("into", into).update();
+        jdbc.sql("""
+                        UPDATE closet.garments t SET
+                               name = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.name ELSE t.name END,
+                               color_name = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.color_name ELSE t.color_name END,
+                               tone = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.tone ELSE t.tone END,
+                               formality = CASE WHEN f.last_seen_at >= t.last_seen_at AND f.formality <> 'unknown' THEN f.formality ELSE t.formality END,
+                               description = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.description ELSE t.description END,
+                               embedding = CASE WHEN f.last_seen_at >= t.last_seen_at THEN COALESCE(f.embedding, t.embedding) ELSE t.embedding END,
+                               thumbnail = CASE WHEN f.thumbnail IS NOT NULL AND (t.thumbnail IS NULL OR f.thumbnail_at >= t.thumbnail_at)
+                                                THEN f.thumbnail ELSE t.thumbnail END,
+                               thumbnail_at = CASE WHEN f.thumbnail IS NOT NULL AND (t.thumbnail IS NULL OR f.thumbnail_at >= t.thumbnail_at)
+                                                THEN f.thumbnail_at ELSE t.thumbnail_at END,
+                               first_seen_at = LEAST(f.first_seen_at, t.first_seen_at),
+                               last_seen_at = GREATEST(f.last_seen_at, t.last_seen_at), updated_at = now()
+                          FROM closet.garments f
+                         WHERE t.id = :into AND t.user_id = :userId AND f.id = :from AND f.user_id = :userId""")
+                .param("userId", userId).param("from", from).param("into", into).update();
+        jdbc.sql("DELETE FROM closet.garments WHERE user_id = :userId AND id = :from")
+                .param("userId", userId).param("from", from).update();
+    }
+
     /** 옷을 지운다. 입은 날(wears)도 FK ON DELETE CASCADE로 함께 지워진다. */
     int delete(UUID userId, Collection<String> ids) {
         return jdbc.sql("DELETE FROM closet.garments WHERE user_id = :userId AND id IN (:ids)")

@@ -53,6 +53,8 @@ public record ClosetProperties(
      * @param dimensions        벡터 길이(DB 열 vector(768)과 같아야 함)
      * @param maxCount          평균에 넣는 사진 수 상한. 넘으면 새 사진 비중을 1/maxCount로 고정(옷이 바래도 따라감)
      * @param text              closet_search의 imageQuery(영어)를 사진 벡터와 비교하는 글 모델. 비우면 쓰지 않음
+     * @param uncertainMargin   기준보다 이만큼 아래까지는 "애매함": 새 옷으로 저장하되 closet_save가 maybeSameAs로 가장 가까운 옷을 알려
+     *                          agent가 GPT로 한 번 더 확인하고 closet_merge로 합칠 수 있게 한다
      */
     public record Image(
             @DefaultValue("0.89") double threshold,
@@ -60,7 +62,8 @@ public record ClosetProperties(
             @DefaultValue("0.60") double adapterThreshold,
             @DefaultValue("768") int dimensions,
             @DefaultValue("10") int maxCount,
-            @DefaultValue Text text) {
+            @DefaultValue Text text,
+            @DefaultValue("0.10") double uncertainMargin) {
     }
 
     /**

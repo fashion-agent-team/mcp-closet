@@ -47,6 +47,8 @@ public class ClosetTools {
             이미 있는 옷이면 새로 만들지 않고 합칩니다(isNew=false). 한 번에 넘긴 옷끼리는 합치지 않습니다. \
             clothes_inspect가 준 garments[].embedding(옷 사진 벡터)과 embeddingModel을 그대로 넘기면 사진으로 같은 옷을 판단해서 훨씬 정확합니다. \
             합쳤는데 사용자가 "그건 다른 옷이에요"라고 하면 그 옷의 id를 forceNewIds에 넣어 다시 부르세요. \
+            saved[].maybeSameAs가 있으면 사진이 애매하게 비슷해서 새 옷으로 저장한 것이니, 이번 사진과 그 옷 설명을 비교해 \
+            같은 옷이면 closet_merge(garmentId=새 옷, intoGarmentId=maybeSameAs.garmentId)를 부르세요. \
             돌려준 garmentId로 closet_wear를 부르세요.""")
     public Object closetSave(
             @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
@@ -97,6 +99,17 @@ public class ClosetTools {
             @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
             @ToolParam(description = "지울 garmentId 목록. 예: c_17") List<String> garmentIds) {
         return run(() -> service.remove(Ids.userId(userId), garmentIds));
+    }
+
+    @Tool(name = "closet_merge", description = """
+            따로 저장된 두 옷을 한 벌로 합칩니다(같은 옷이 새 옷으로 저장된 경우). garmentId를 intoGarmentId에 합치고 garmentId는 없어집니다. \
+            입은 날 기록은 옮기고, 설명은 더 최근에 본 쪽을 남깁니다. 종류가 다르면 합치지 않습니다. \
+            closet_save의 maybeSameAs를 사진으로 확인했거나 사용자가 "그거 같은 옷이에요"라고 했을 때 부르세요.""")
+    public Object closetMerge(
+            @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
+            @ToolParam(description = "없앨 쪽 garmentId(보통 방금 새로 저장된 옷). 예: c_18") String garmentId,
+            @ToolParam(description = "남길 쪽 garmentId. 예: c_3") String intoGarmentId) {
+        return run(() -> service.merge(Ids.userId(userId), garmentId, intoGarmentId));
     }
 
     private Object run(Supplier<Object> body) {

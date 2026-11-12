@@ -69,14 +69,14 @@ class ImageMatcherTest {
     }
 
     @Test
-    @DisplayName("기본 보정 행렬(jar 안, CC0로 만듦)을 읽고 기준 0.68을 쓴다. 같은 벡터는 1, 길이 1 유지")
+    @DisplayName("기본 보정 행렬(jar 안, CC0로 만듦)을 읽고 기준 0.60을 쓴다. 같은 벡터는 1, 길이 1 유지")
     void defaultAdapter() {
         var m = new ImageMatcher(new ClosetProperties(0.90, 20, 500, 8, 20, 3,
                 new ClosetProperties.Embedding("hash", "", "", "models", 256, java.time.Duration.ofMinutes(1)),
-                new ClosetProperties.Image(0.89, "classpath:image-adapter/fsiglip-cc0-aug.bin", 0.68, 768, 10,
+                new ClosetProperties.Image(0.89, "classpath:image-adapter/fsiglip-cc0-aug.bin", 0.60, 768, 10,
                         new ClosetProperties.Text("", "", "marqo-fashionSigLIP", 1.5))));
         assertThat(m.adapted()).isTrue();
-        assertThat(m.threshold()).isEqualTo(0.68);
+        assertThat(m.threshold()).isEqualTo(0.60);
         var v = new ArrayList<Double>();
         for (int i = 0; i < 768; i++) {
             v.add(Math.sin(i * 0.37));

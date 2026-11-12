@@ -57,7 +57,7 @@ public record ClosetProperties(
     public record Image(
             @DefaultValue("0.89") double threshold,
             @DefaultValue("classpath:image-adapter/fsiglip-cc0-aug.bin") String adapterPath,
-            @DefaultValue("0.68") double adapterThreshold,
+            @DefaultValue("0.60") double adapterThreshold,
             @DefaultValue("768") int dimensions,
             @DefaultValue("10") int maxCount,
             @DefaultValue Text text) {

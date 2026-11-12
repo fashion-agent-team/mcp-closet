@@ -44,7 +44,8 @@
 - [x] 사진 벡터로 옷 이름·무늬·격식 고르기(이름 검색 20→44%)
 - [x] 영어 검색어로 사진 벡터 직접 찾기(`imageQuery`, 이름 44→57%, 상황 28→37%)
 - [x] 운영 이미지에 글 모델 넣기(Docker 이미지에서는 `imageQuery` 기본 켜짐)
-- [ ] 팀원 폰으로 찍은 실제 옷 사진으로 사진 기준값(기본 0.68) 다시 확인
+- [x] 일상(소비자) 사진으로 사진 기준값 다시 맞추기(0.68 → 0.60, DeepFashion2 소비자 사진)
+- [ ] 팀원 폰으로 찍은 실제 옷 사진으로 한 번 더 확인
 
 ## 이미지
 
@@ -73,7 +74,7 @@ docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Huggi
 | `CLOSET_SAME_GARMENT_THRESHOLD` | `0.90` | 사진 벡터가 없을 때 같은 옷으로 합치는 글 유사도 기준 |
 | `CLOSET_IMAGE_TEXT_MODEL_URI` / `CLOSET_IMAGE_TEXT_TOKENIZER_URI` | 빈 값(꺼짐). Docker 이미지에서는 이미지 안의 파일(켜짐) | closet_search `imageQuery`용 FashionSigLIP 글 모델(int8 ONNX)·tokenizer.json |
 | `CLOSET_IMAGE_ADAPTER` | jar 안 CC0 보정 행렬 | 사진 보정 행렬(WCCN). 파일 경로를 주면 그것을, 빈 값이면 보정 없이 |
-| `CLOSET_IMAGE_ADAPTER_THRESHOLD` | `0.68` | 보정 행렬을 쓸 때 같은 옷이라고 보는 유사도(행렬마다 다름, docs/DEVELOPMENT.md) |
+| `CLOSET_IMAGE_ADAPTER_THRESHOLD` | `0.60` | 보정 행렬을 쓸 때 같은 옷이라고 보는 유사도(행렬마다 다름, docs/DEVELOPMENT.md) |
 | `CLOSET_IMAGE_THRESHOLD` | `0.89` | 보정 없이 쓸 때의 기준 |
 
 API 키는 필요 없습니다(임베딩은 서버 CPU에서 돌고, GPT는 agent가 부릅니다). 만든 방식과 잰 숫자는 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)에 있습니다.

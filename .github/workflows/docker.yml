@@ -75,6 +75,7 @@ jobs:
           docker logs closet 2>&1 | tail -40
           curl -fs localhost:8095/actuator/health | grep -q '"UP"'
           if docker logs closet 2>&1 | grep -q "모델 내려받는 중"; then echo "이미지 안의 모델을 쓰지 않고 내려받으려 했어요"; exit 1; fi
+          if ! docker logs closet 2>&1 | grep -q "imageQuery): marqo-fashionSigLIP 준비"; then echo "이미지 안의 FashionSigLIP 글 모델을 못 읽었어요"; exit 1; fi
 
       - name: ghcr.io 로그인
         if: github.event_name != 'pull_request'

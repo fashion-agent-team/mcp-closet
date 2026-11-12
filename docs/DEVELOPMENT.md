@@ -136,7 +136,7 @@ clothes_inspect의 이름은 "티셔츠·바지·니트"처럼 굵고, 격식은
 
 agent가 `imageQuery`에 찾는 옷을 짧은 영어로 주면(예: `warm winter clothes`) FashionSigLIP 글 모델로 벡터를 만들어 옷 사진 벡터(같은 모델)와 코사인을 잽니다. 점수 = e5 점수 + 1.5 × 사진↔글 유사도. 사진 벡터가 없는 옷은 있는 옷들의 평균을 더해서 손해 보지 않게 합니다. 글 모델이 꺼져 있거나 실패하면 `imageQuery`를 무시하고 예전처럼 찾습니다.
 
-- 글 모델: `text_model.onnx`를 int8로 줄인 것(~111MB, `tools/image-labels/quantize_text.py`). jar에 넣지 않고 `CLOSET_IMAGE_TEXT_MODEL_URI`, `CLOSET_IMAGE_TEXT_TOKENIZER_URI`로 줍니다(비우면 꺼짐, 기본은 꺼짐).
+- 글 모델: Hugging Face `Marqo/marqo-fashionSigLIP`의 `onnx/text_model.onnx`(441MB)를 int8로 줄인 것(~111MB, `tools/image-labels/quantize_text.py`). jar에는 넣지 않고 Docker 이미지에 넣습니다(빌드할 때 받아 sha256 검사 후 줄임). 이미지에서는 `CLOSET_IMAGE_TEXT_MODEL_URI`·`CLOSET_IMAGE_TEXT_TOKENIZER_URI`가 이미지 안 파일을 가리켜 켜져 있고, 빈 값으로 주면 꺼집니다. `./gradlew bootRun`은 기본 꺼짐.
 - 전처리: open_clip SigLIP 방식(문장부호 빼기·소문자 → T5 sentencepiece, 64토큰, 빈칸 1). 앞에 `a photo of `를 붙입니다. Java 토큰 id·벡터가 Python과 같은지 `ImageTextModelTest`(FSIGLIP_TEXT_DIR)로 확인.
 - 가중치 1.5: Python 벤치마크에서 0.5·1·1.5·2·3 중 전체 정답률이 가장 높았습니다(1.5~2가 비슷).
 - 속도: closet_search 18ms → 64ms(글 모델 한 번), 서버 메모리 약 1.1GB.

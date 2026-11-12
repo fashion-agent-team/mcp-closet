@@ -43,13 +43,13 @@
 - [x] 누구나 써도 되는 데이터(CC0)로 만든 사진 보정 행렬을 기본으로 넣기
 - [x] 사진 벡터로 옷 이름·무늬·격식 고르기(이름 검색 20→44%)
 - [x] 영어 검색어로 사진 벡터 직접 찾기(`imageQuery`, 이름 44→57%, 상황 28→37%)
-- [ ] 운영에 글 모델 파일 올리기(CLOSET_IMAGE_TEXT_MODEL_URI)
+- [x] 운영 이미지에 글 모델 넣기(Docker 이미지에서는 `imageQuery` 기본 켜짐)
 - [ ] 팀원 폰으로 찍은 실제 옷 사진으로 사진 기준값(기본 0.68) 다시 확인
 
 ## 이미지
 
 - `develop`에 합쳐지면 `ghcr.io/fashion-agent-team/mcp-closet:dev`, `main`에 합쳐지면 `:latest`로 자동으로 올라갑니다(GitHub Actions `Docker`). 올리기 전에 pgvector와 함께 띄워 `/actuator/health`가 UP인지, 이미지 안의 모델을 쓰는지 확인합니다. PR에서는 빌드와 확인만 합니다.
-- 받기: `docker pull ghcr.io/fashion-agent-team/mcp-closet:dev` (임베딩 모델 포함, 약 1.07GB, 메모리 1GB 이상 권장)
+- 받기: `docker pull ghcr.io/fashion-agent-team/mcp-closet:dev` (e5 임베딩 모델과 FashionSigLIP 글 모델 포함, 약 1.2GB, 메모리 1.2GB 이상 권장)
 - 필요한 환경 변수: `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`
 
 ## 실행
@@ -60,7 +60,7 @@ SPRING_DATASOURCE_PASSWORD=… ./gradlew bootRun          # 처음 뜰 때 e5 �
 CLOSET_EMBEDDING_PROVIDER=hash ./gradlew bootRun        # 모델 없이 띄우기(개발용, 검색 품질 없음)
 ./gradlew test                                          # Docker 필요(Testcontainers pgvector). 없으면 DB 테스트는 건너뜀
 CLOSET_E5_DIR=/path/to/e5 ./gradlew test                # model.onnx·tokenizer.json이 있으면 실제 e5 테스트도 돎
-docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # 모델을 이미지에 넣음(Hugging Face에서 받고 sha256 검사)
+docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # e5·FashionSigLIP 글 모델을 이미지에 넣음(Hugging Face에서 받고 sha256 검사, 글 모델은 int8로 줄임)
 docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Hugging Face가 막힌 곳: 같은 파일을 둔 주소(onnx/model_quantized.onnx, tokenizer.json)
 ```
 
@@ -71,7 +71,7 @@ docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Huggi
 | `CLOSET_EMBEDDING_MODEL_URI` / `CLOSET_EMBEDDING_TOKENIZER_URI` | Hugging Face `Xenova/multilingual-e5-small` 양자화 ONNX | `https:`, `file:`, `classpath:` |
 | `CLOSET_MODEL_DIR` | `models` | 내려받은 모델 둘 곳 |
 | `CLOSET_SAME_GARMENT_THRESHOLD` | `0.90` | 사진 벡터가 없을 때 같은 옷으로 합치는 글 유사도 기준 |
-| `CLOSET_IMAGE_TEXT_MODEL_URI` / `CLOSET_IMAGE_TEXT_TOKENIZER_URI` | 빈 값(꺼짐) | closet_search `imageQuery`용 FashionSigLIP 글 모델(int8 ONNX)·tokenizer.json |
+| `CLOSET_IMAGE_TEXT_MODEL_URI` / `CLOSET_IMAGE_TEXT_TOKENIZER_URI` | 빈 값(꺼짐). Docker 이미지에서는 이미지 안의 파일(켜짐) | closet_search `imageQuery`용 FashionSigLIP 글 모델(int8 ONNX)·tokenizer.json |
 | `CLOSET_IMAGE_ADAPTER` | jar 안 CC0 보정 행렬 | 사진 보정 행렬(WCCN). 파일 경로를 주면 그것을, 빈 값이면 보정 없이 |
 | `CLOSET_IMAGE_ADAPTER_THRESHOLD` | `0.68` | 보정 행렬을 쓸 때 같은 옷이라고 보는 유사도(행렬마다 다름, docs/DEVELOPMENT.md) |
 | `CLOSET_IMAGE_THRESHOLD` | `0.89` | 보정 없이 쓸 때의 기준 |

@@ -108,7 +108,7 @@ public class ClosetService {
             }
             Garment.Normalized n = g.normalize();
             float[] img = model == null ? null : images.accept(g.embedding());
-            ImageLabels.Guess guess = img != null && model.equals(labels.model()) ? labels.guess(img, n.category()) : null;
+            ImageLabels.Guess guess = img != null && model.equals(labels.model()) ? labels.guess(img, n.category(), n.name()) : null;
             normalized.add(guess == null ? n : n.withImageGuess(guess));
             imgs.add(img);
             guesses.add(guess);

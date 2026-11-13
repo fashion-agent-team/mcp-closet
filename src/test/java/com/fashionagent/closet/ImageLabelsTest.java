@@ -70,4 +70,14 @@ class ImageLabelsTest {
         assertThat(labels.guess(vest, "outer", "겉옷").name()).isEqualTo("조끼");
         assertThat(labels.guess(vest, "outer", null).name()).isEqualTo("조끼");
     }
+
+    @Test
+    @DisplayName("베이지·카키처럼 청바지 색이 아니면 청바지라고 부르지 않는다")
+    void noBeigeJeans() throws Exception {
+        float[] jeans = vectorOf("names", "청바지");
+        assertThat(labels.guess(jeans, "bottom", "바지", "beige").name()).isNotEqualTo("청바지").isNotNull();
+        assertThat(labels.guess(jeans, "bottom", "바지", "khaki").name()).isNotEqualTo("청바지");
+        assertThat(labels.guess(jeans, "bottom", "바지", "blue").name()).isEqualTo("청바지");
+        assertThat(labels.guess(jeans, "bottom", "바지", null).name()).isEqualTo("청바지");
+    }
 }

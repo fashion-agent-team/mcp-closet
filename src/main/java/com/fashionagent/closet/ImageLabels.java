@@ -93,6 +93,15 @@ public class ImageLabels {
      * 2026-11-12 시뮬에서 자켓을 조끼로, 패딩을 카디건으로 바꿔 틀렸음. "옷"·"겉옷"처럼 넓은 이름이면 종류 안에서 다 고른다.
      */
     public Guess guess(float[] v, String category, String inspectName) {
+        return guess(v, category, inspectName, null);
+    }
+
+    /** 청바지라고 불러도 되는 색 계열. 2026-11-13 실서버 시뮬: 베이지 면바지를 "베이지 청바지"로 저장함. */
+    static final java.util.Set<String> DENIM_COLORS = java.util.Set.of("blue", "navy", "black", "gray", "unknown");
+
+    /** colorFamily가 청바지 색이 아니면(베이지·카키·흰색 등) 청바지는 고르지 않는다. null이면 제한 없음. */
+    public Guess guess(float[] v, String category, String inspectName, String colorFamily) {
+        boolean noDenim = colorFamily != null && !DENIM_COLORS.contains(colorFamily);
         java.util.Set<String> family = inspectName == null ? null : FAMILY.get(inspectName.strip());
         Label best = null;
         double bs = -2;
@@ -101,6 +110,9 @@ public class ImageLabels {
                 continue;
             }
             if (family != null && !family.contains(l.ko())) {
+                continue;
+            }
+            if (noDenim && "청바지".equals(l.ko())) {
                 continue;
             }
             double s = Vectors.dot(v, l.vector());

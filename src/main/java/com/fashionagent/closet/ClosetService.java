@@ -243,7 +243,8 @@ public class ClosetService {
     /** description(jsonb)에는 받은 Garment 전체를 두되 id는 옷장 id로 바꾸고, 사진 벡터(숫자 768개)·작은 사진은 따로 두므로 뺀다. */
     private String describe(Garment g, String garmentId, ImageLabels.Guess guess) {
         Garment copy = new Garment(garmentId, g.category(), g.name(), g.colorName(), g.colorFamily(), g.tone(), g.pattern(),
-                g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence(), null, null);
+                g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence(), null, null,
+                g.subColorName(), g.subColorFamily(), g.patternCheckedBy(), g.patternGuess());
         if (guess == null) {
             return json.writeValueAsString(copy);
         }

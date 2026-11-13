@@ -266,6 +266,11 @@ class McpServerTest {
         g.put("position", null);
         g.put("confidence", 0.91);
         g.put("embedding", vector(3, 0.0));
+        // 2026-11-12 agent #34·#35가 넘기기 시작한 필드
+        g.put("subColorName", "남색");
+        g.put("subColorFamily", "navy");
+        g.put("patternCheckedBy", "model");
+        g.put("patternGuess", "줄무늬");
         JsonNode r = call("closet_save", Map.of("userId", user, "garments", List.of(g), "embeddingModel", "marqo-fashionSigLIP"));
         assertThat(r.has("saved")).as(r.toString()).isTrue();
         assertThat(r.get("saved").get(0).get("isNew").asBoolean()).isTrue();

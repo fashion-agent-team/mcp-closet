@@ -28,7 +28,12 @@ public record Garment(
         @ToolParam(required = false, description = "left | center | right") String position,
         @ToolParam(required = false, description = "0~1") Double confidence,
         @ToolParam(required = false, description = "clothes_inspect가 준 옷 사진 벡터(768개). 그대로 넘기세요. 같은 옷 판단에 씀") List<Double> embedding,
-        @ToolParam(required = false, description = "옷 부분만 잘라 긴 변 256px로 줄인 JPEG(base64, 얼굴 없이, 48KB 이하). 애매할 때 GPT 비교용으로 저장") String thumbnail) {
+        @ToolParam(required = false, description = "옷 부분만 잘라 긴 변 256px로 줄인 JPEG(base64, 얼굴 없이, 48KB 이하). 애매할 때 GPT 비교용으로 저장") String thumbnail,
+        // clothes_inspect·agent가 2026-11-12부터 넘기는 필드. MCP 입력 검사가 모르는 필드를 거절해서 옷장 저장이 다 실패했음.
+        @ToolParam(required = false, description = "무늬 옷의 두 번째 색 이름. 예: 남색") String subColorName,
+        @ToolParam(required = false, description = "두 번째 색 계열") String subColorFamily,
+        @ToolParam(required = false, description = "model | gpt. 무늬를 누가 정했는지") String patternCheckedBy,
+        @ToolParam(required = false, description = "무늬를 확실히 모를 때 모델 1등 무늬") String patternGuess) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Defect(String kind, String where, Double confidence,
@@ -41,7 +46,7 @@ public record Garment(
 
     Garment withPattern(String p) {
         return new Garment(id, category, name, colorName, colorFamily, tone, p, material, notes, formality, defects, box,
-                position, confidence, embedding, thumbnail);
+                position, confidence, embedding, thumbnail, subColorName, subColorFamily, patternCheckedBy, patternGuess);
     }
 
     static final Set<String> CATEGORIES = Set.of("top", "bottom", "outer", "dress", "shoes", "other");

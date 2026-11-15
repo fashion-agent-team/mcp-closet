@@ -366,12 +366,31 @@ public class ClosetService {
             throw ClosetException.badRequest("imageQuery는 200자 이내여야 해요.");
         }
         try {
-            return garments.imageSimilarities(userId, imageText.embed("a photo of " + imageQuery.trim()), imageText.model());
+            // "leggings, hoodie, track pants"처럼 옷 이름을 여럿 주면 하나씩 견줘 가장 가까운 값을 씁니다. 여러 이름을 한 문장으로
+            // 견주면 뜻이 흐려집니다(2026-11-15 측정: 상황 질문 위 5개 정답 55% → 63%).
+            Map<String, Double> best = new java.util.HashMap<>();
+            for (String phrase : phrases(imageQuery)) {
+                garments.imageSimilarities(userId, imageText.embed("a photo of " + phrase), imageText.model())
+                        .forEach((id, s) -> best.merge(id, s, Math::max));
+            }
+            return best;
         } catch (RuntimeException e) {
             // 사진↔글은 덤이라 실패해도 글 검색 결과는 돌려준다
             log.warn("imageQuery 임베딩 실패: {}", e.toString());
             return Map.of();
         }
+    }
+
+    /** imageQuery를 쉼표·or·and로 나눈 옷 이름들(최대 8개). 나눌 게 없으면 한 문장 그대로. */
+    static List<String> phrases(String imageQuery) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String p : imageQuery.trim().split(",|\\s+or\\s+|\\s+and\\s+")) {
+            String t = p.strip();
+            if (!t.isEmpty() && out.size() < 8) {
+                out.add(t);
+            }
+        }
+        return out.isEmpty() ? List.of(imageQuery.trim()) : out;
     }
 
     /** 비 문서는 상황 문장에 비 이야기가 있을 때만 넣는다(아니면 어느 검색에나 끼어서). */

@@ -1,0 +1,61 @@
+server:
+  port: 8095
+
+spring:
+  application:
+    name: mcp-closet
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fashion}
+    username: ${SPRING_DATASOURCE_USERNAME:fashion}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  flyway:
+    # 공용 DB라서 Flyway 기록 표도 closet 스키마 안에 둔다(다른 서비스와 안 겹치게).
+    schemas: closet
+    default-schema: closet
+    create-schemas: true
+  ai:
+    vectorstore:
+      pgvector:
+        # 앱 레포 specs/005-database/contracts/migrations.md와 같음. 표는 Flyway가 만든다.
+        schema-name: closet
+        table-name: style_docs
+        dimensions: 384
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+        initialize-schema: false
+        schema-validation: true
+    mcp:
+      server:
+        name: mcp-closet
+        version: 0.1.0
+        type: sync
+        protocol: streamable
+        streamable-http:
+          mcp-endpoint: /mcp
+        instructions: 사용자 옷장(본 옷의 설명)과 코디 지식을 저장·검색하는 서버입니다. 옷 추천 때 후보를 찾고, 추천을 마치면 본 옷과 입은 날을 기록합니다.
+
+closet:
+  same-garment-threshold: ${CLOSET_SAME_GARMENT_THRESHOLD:0.90}
+  image:
+    threshold: ${CLOSET_IMAGE_THRESHOLD:0.89}
+    # 기본: CC0 옷 사진으로 만든 보정 행렬(jar 안). 끄려면 CLOSET_IMAGE_ADAPTER= (빈 값), 그때 기준은 threshold(0.89)
+    adapter-path: ${CLOSET_IMAGE_ADAPTER:classpath:image-adapter/fsiglip-cc0-aug.bin}
+    adapter-threshold: ${CLOSET_IMAGE_ADAPTER_THRESHOLD:0.60}
+    # 기준보다 이만큼 아래까지는 애매함 → closet_save가 maybeSameAs로 알려 agent가 GPT로 확인(closet_merge). 2026-11-15 DF2 1,500벌·GPT 482쌍 측정: 0.10이면 맞게 합침 74%·새 옷 잘못 합침 3.3%, 0.20이면 79.8%·4.0%(GPT 없음 63%·2.3%)
+    uncertain-margin: ${CLOSET_IMAGE_UNCERTAIN_MARGIN:0.20}
+    # closet_search imageQuery(영어)용 FashionSigLIP 글 모델(int8 ONNX ~111MB). 비우면 imageQuery를 무시
+    text:
+      model-uri: ${CLOSET_IMAGE_TEXT_MODEL_URI:}
+      tokenizer-uri: ${CLOSET_IMAGE_TEXT_TOKENIZER_URI:}
+      weight: ${CLOSET_IMAGE_TEXT_WEIGHT:1.5}
+  embedding:
+    provider: ${CLOSET_EMBEDDING_PROVIDER:onnx}
+    model-uri: ${CLOSET_EMBEDDING_MODEL_URI:https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model_quantized.onnx}
+    tokenizer-uri: ${CLOSET_EMBEDDING_TOKENIZER_URI:https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/tokenizer.json}
+    cache-dir: ${CLOSET_MODEL_DIR:models}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

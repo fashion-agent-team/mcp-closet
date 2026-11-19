@@ -1,34 +1,103 @@
 # mcp-closet
 
-**closet MCP 서버** · 패션 에이전트(시각장애인용 코디 도우미)의 한 부분입니다.
+**closet MCP 서버 · 내 옷장 (RAG)** · 패션 에이전트(시각장애인용 음성 AI 옷 추천)의 한 부분입니다.
 
-사용자가 찍은 옷을 DB에 기록해 사용자 전용 옷장을 만들고, 이후 이 옷장에서 옷을 추천합니다.
+담당: (미정)
 
-## 도구 (안)
+## 한눈에
 
-- `add_clothes(description)`: 옷 설명(종류·색·무늬·격식)을 옷장에 기록 (사진은 저장 안 함)
-- `list_closet()`: 내 옷장 목록
-- `recommend_from_closet(conditions)`: 날씨·일정 조건에 맞는 옷 고르기
+- 포트: 8095, 엔드포인트: `http://mcp-closet:8095/mcp` (Streamable HTTP)
+- 기술: Spring Boot, Spring AI MCP Server, Spring AI VectorStore + pgvector, multilingual-e5-small 임베딩(ONNX, 384차원), PostgreSQL
+- 상태 확인: `GET /actuator/health`
 
-## 지금 상태
+## MCP 도구
 
-앱이 본 옷의 설명만 폰에 쌓고 있습니다. 여기로 옮길 코드:
-- `fashion-agent`의 `lib/services/wardrobe_store.dart`, `lib/models/garment.dart`
-- 색 조합 규칙 `lib/styling/color_rules.dart` (추천에 다시 쓸 수 있음)
+| 도구 | 하는 일 |
+| --- | --- |
+| `closet_search` | RAG의 검색 단계. 상황(일정·날씨 문장)에 맞는 내 옷 후보 + 코디 지식 문서. 생성(추천 문장)은 agent의 GPT가 함. `imageQuery`(영어)를 주면 옷 사진 벡터로도 찾음 |
+| `closet_save` | 옷 추천을 마칠 때 본 옷을 기록. 같은 옷이면 합침: clothes_inspect가 준 **옷 사진 벡터**(FashionSigLIP)로 판단, 벡터가 없으면 글 임베딩 + 종류·색·이름 규칙. 한 번에 온 옷끼리는 안 합침, `forceNewIds` |
+| `closet_wear` | 입은 날 기록 |
+| `closet_outfits` | 예전에 입은 조합(같은 날 입은 옷을 한 벌로). "지난번 면접 때 뭐 입었지?" |
+| `closet_list` | 옷장 목록(종류 순, 입은 횟수). "내 옷장에 뭐 있어?" |
+| `closet_remove` | 옷 지우기(버린 옷, 잘못 저장된 옷). 입은 날 기록도 함께 지움 |
+| `closet_merge` | 따로 저장된 두 옷을 한 벌로 합치기. closet_save의 `maybeSameAs`(사진이 애매하게 비슷함)를 agent가 GPT로 두 사진을 비교해 같은 옷이라고 하면 부름. 사용자가 "그거 같은 옷이에요"라고 할 때도 |
+
+입출력 JSON은 [MCP 도구 입출력](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/mcp-tools.md)를 그대로 따릅니다.
+
+## 이 레포가 지킬 것
+
+- 옷 설명은 `clothes_inspect`가 준 Garment JSON을 그대로 JSONB로 저장합니다. 원본 사진은 저장하지 않고, **옷 부분만 자른 작은 사진**(`thumbnail`, 긴 변 256px JPEG, 얼굴 없음, 48KB 이하)만 우리 DB에 둡니다(2026-11-12 결정). 애매할 때 GPT가 같은 옷인지 사진끼리 비교하는 데만 쓰고, 옷을 지우면 함께 지워집니다.
+- 코디 지식 문서(`style_docs`: 드레스코드, 색 조합, 날씨별 옷차림)는 우리가 직접 씁니다.
+- 옷장이 비면 `empty: true`를 돌려주고 agent가 "옷 확인을 몇 번 하면 옷장이 채워져요"라고 안내합니다.
+- DB 스키마 `closet`만 씁니다(`garments`, `wears`, `style_docs`).
 
 ## 할 일
 
-- [ ] MCP 서버 만들기
-- [ ] 옷장을 DB에 저장
-- [ ] 같은 옷 합치기
+- [x] 뼈대 + `/mcp` + Dockerfile, pgvector 확장
+- [x] `closet_save`(중복 합치기 포함), `closet_wear`
+- [x] 임베딩 모델(ONNX) 붙이기, `closet_search`
+- [x] 코디 지식 문서 10~20개 쓰기 (17개, `src/main/resources/style_docs/`)
+- [x] PR마다 자동 테스트 (GitHub Actions `CI`)
+- [x] Docker 이미지 자동 빌드·확인·올리기 (`ghcr.io/fashion-agent-team/mcp-closet`)
+- [ ] agent에 붙여 옷 추천 1단계에서 불러 보기
+- [x] 옷 사진 벡터로 같은 옷 판단 (mcp-clothes-state 이슈 #15)
+- [x] 누구나 써도 되는 데이터(CC0)로 만든 사진 보정 행렬을 기본으로 넣기
+- [x] 사진 벡터로 옷 이름·무늬·격식 고르기(이름 검색 20→44%)
+- [x] 영어 검색어로 사진 벡터 직접 찾기(`imageQuery`, 이름 44→57%, 상황 28→37%)
+- [x] 운영 이미지에 글 모델 넣기(Docker 이미지에서는 `imageQuery` 기본 켜짐)
+- [x] 일상(소비자) 사진으로 사진 기준값 다시 맞추기(0.68 → 0.60, DeepFashion2 소비자 사진)
+- [ ] 팀원 폰으로 찍은 실제 옷 사진으로 한 번 더 확인
 
-## 전체 구조
+## 이미지
 
+- `develop`에 합쳐지면 `ghcr.io/fashion-agent-team/mcp-closet:dev`, `main`에 합쳐지면 `:latest`로 자동으로 올라갑니다(GitHub Actions `Docker`). 올리기 전에 pgvector와 함께 띄워 `/actuator/health`가 UP인지, 이미지 안의 모델을 쓰는지 확인합니다. PR에서는 빌드와 확인만 합니다.
+- 받기: `docker pull ghcr.io/fashion-agent-team/mcp-closet:dev` (e5 임베딩 모델과 FashionSigLIP 글 모델 포함, 약 1.2GB, 메모리 1.2GB 이상 권장)
+- 필요한 환경 변수: `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`
+
+## 실행
+
+```bash
+# PostgreSQL + pgvector가 떠 있어야 합니다(앱 레포 docs/infra/docker-compose.yml의 postgres).
+SPRING_DATASOURCE_PASSWORD=… ./gradlew bootRun          # 처음 뜰 때 e5 모델(약 118MB)을 models/에 내려받음
+CLOSET_EMBEDDING_PROVIDER=hash ./gradlew bootRun        # 모델 없이 띄우기(개발용, 검색 품질 없음)
+./gradlew test                                          # Docker 필요(Testcontainers pgvector). 없으면 DB 테스트는 건너뜀
+CLOSET_E5_DIR=/path/to/e5 ./gradlew test                # model.onnx·tokenizer.json이 있으면 실제 e5 테스트도 돎
+docker build -t ghcr.io/fashion-agent-team/mcp-closet:dev .   # e5·FashionSigLIP 글 모델을 이미지에 넣음(Hugging Face에서 받고 sha256 검사, 글 모델은 int8로 줄임)
+docker build --build-arg MODEL_BASE_URL=http://내부주소/e5 -t … .  # Hugging Face가 막힌 곳: 같은 파일을 둔 주소(onnx/model_quantized.onnx, tokenizer.json)
 ```
-application(fashion-agent) ─REST→ fashion-agent-gateway ─→ fashion-agent-agent ─MCP→ mcp-weather / mcp-schedule / mcp-clothes-state / mcp-face-check / mcp-closet
-                                                                                              ↓
-                                                                                              DB (계정·회원정보·일정·옷장)
-```
+
+| 환경 변수 | 기본값 | 뜻 |
+| --- | --- | --- |
+| `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | `jdbc:postgresql://localhost:5432/fashion` / `fashion` / (없음) | 공용 DB |
+| `CLOSET_EMBEDDING_PROVIDER` | `onnx` | `onnx`(multilingual-e5-small) 또는 `hash`(개발용) |
+| `CLOSET_EMBEDDING_MODEL_URI` / `CLOSET_EMBEDDING_TOKENIZER_URI` | Hugging Face `Xenova/multilingual-e5-small` 양자화 ONNX | `https:`, `file:`, `classpath:` |
+| `CLOSET_MODEL_DIR` | `models` | 내려받은 모델 둘 곳 |
+| `CLOSET_SAME_GARMENT_THRESHOLD` | `0.90` | 사진 벡터가 없을 때 같은 옷으로 합치는 글 유사도 기준 |
+| `CLOSET_IMAGE_TEXT_MODEL_URI` / `CLOSET_IMAGE_TEXT_TOKENIZER_URI` | 빈 값(꺼짐). Docker 이미지에서는 이미지 안의 파일(켜짐) | closet_search `imageQuery`용 FashionSigLIP 글 모델(int8 ONNX)·tokenizer.json |
+| `CLOSET_IMAGE_ADAPTER` | jar 안 CC0 보정 행렬 | 사진 보정 행렬(WCCN). 파일 경로를 주면 그것을, 빈 값이면 보정 없이 |
+| `CLOSET_IMAGE_ADAPTER_THRESHOLD` | `0.60` | 보정 행렬을 쓸 때 같은 옷이라고 보는 유사도(행렬마다 다름, docs/DEVELOPMENT.md) |
+| `CLOSET_IMAGE_THRESHOLD` | `0.89` | 보정 없이 쓸 때의 기준 |
+| `CLOSET_IMAGE_UNCERTAIN_MARGIN` | `0.10` | 기준보다 이만큼 아래까지는 애매함: 새 옷으로 저장하되 `maybeSameAs`로 가장 가까운 옷(작은 사진 포함)을 알려 agent가 GPT로 확인 |
+
+API 키는 필요 없습니다(임베딩은 서버 CPU에서 돌고, GPT는 agent가 부릅니다). 만든 방식과 잰 숫자는 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)에 있습니다.
+
+## 공통 약속
+
+모든 레포가 지키는 약속은 앱 레포에 있습니다. **코드보다 약속 문서를 먼저 고칩니다.**
+
+- [서비스 간 약속](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/README.md): 공통 규칙, 포트, 인증(`X-User-Id`), 오류 모양, DB 스키마, 옷 추천 흐름
+- [MCP 도구 입출력](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/mcp-tools.md)
+- [앱 ↔ 게이트웨이 API (OpenAPI)](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/openapi.yaml)
+- [아키텍처와 기술 스택](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/ARCHITECTURE.md)
+
+## 버전
+
+| 항목 | 버전 |
+| --- | --- |
+| Java | 21 |
+| Spring Boot | 4.0.9 |
+| Spring Cloud | 2025.1.4 |
+| Spring AI (BOM) | 2.0.2 |
 
 ## 브랜치
 
@@ -36,4 +105,4 @@ GitFlow를 따릅니다. `develop`에서 `feature/…` 브랜치를 따서 PR로
 
 ## 비밀 값
 
-API 키와 DB 접속 정보는 레포에 넣지 않습니다. 배포 환경의 비밀 값(Secret)으로만 둡니다.
+이 서버는 API 키를 쓰지 않습니다. DB 비밀번호는 레포에 넣지 않습니다. 로컬은 `.env`(커밋 금지), 배포는 서버 환경 변수로 둡니다. 목록은 앱 레포 `docs/infra/.env.example`에 있습니다.

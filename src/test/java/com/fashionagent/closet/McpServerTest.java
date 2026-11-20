@@ -130,11 +130,16 @@ class McpServerTest {
 
         assertThat(jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = CAST(:u AS uuid)").param("u", user)
                 .query(Integer.class).single()).isEqualTo(3);
-        String desc = jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", knit)
-                .query(String.class).single();
-        assertThat(desc).contains("stain", "오른쪽 소매 끝");
-        assertThat(jdbc.sql("SELECT description ->> 'id' FROM closet.garments WHERE id = :id").param("id", knit)
-                .query(String.class).single()).isEqualTo(knit);
+        // 얼룩은 garment_defects에 한 줄씩(V4 정규화)
+        assertThat(jdbc.sql("SELECT kind || '/' || location || '/' || confidence FROM closet.garment_defects WHERE garment_id = :id")
+                .param("id", knit).query(String.class).list()).containsExactly("stain/오른쪽 소매 끝/0.850");
+        assertThat(jdbc.sql("SELECT material FROM closet.garments WHERE id = :id").param("id", knit)
+                .query(String.class).single()).isEqualTo("니트 같음");
+        // 다음에 얼룩 없이 다시 보면 얼룩 줄도 마지막 상태(없음)로 바뀐다
+        call("closet_save", Map.of("userId", user, "garments", List.of(
+                garment("g9", "top", "니트", "차콜 그레이", "gray", "dark", "smart", "니트 같음"))));
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.garment_defects WHERE garment_id = :id").param("id", knit)
+                .query(Integer.class).single()).isZero();
 
         // 다른 사람 옷장과는 합치지 않는다
         String other = UUID.randomUUID().toString();
@@ -164,9 +169,6 @@ class McpServerTest {
         assertThat(r2.get("saved").get(0).get("isNew").asBoolean()).isFalse();
         assertThat(jdbc.sql("SELECT image_count FROM closet.garments WHERE id = :id").param("id", a).query(Integer.class).single())
                 .isEqualTo(2);
-        // 사진 벡터는 description(jsonb)에 넣지 않는다
-        assertThat(jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", a).query(String.class).single())
-                .doesNotContain("embedding");
 
         var other = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
         other.put("embedding", shirtB);
@@ -218,9 +220,6 @@ class McpServerTest {
         assertThat(s2.get("maybeSameAs").get("thumbnail").asString()).isEqualTo(jpeg);
         assertThat(s2.get("maybeSameAs").get("similarity").asDouble()).isBetween(0.83, 0.85);
         String dup = s2.get("garmentId").asString();
-        // 작은 사진은 description(jsonb)에 넣지 않는다
-        assertThat(jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", coat).query(String.class).single())
-                .doesNotContain("thumbnail");
 
         call("closet_wear", Map.of("userId", user, "garmentIds", List.of(dup), "date", "2026-11-02"));
         JsonNode m = call("closet_merge", Map.of("userId", user, "garmentId", dup, "intoGarmentId", coat));

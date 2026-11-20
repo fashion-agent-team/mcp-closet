@@ -9,7 +9,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** closet.garments, closet.wears. SQL은 앱 레포 specs/005-database/data-model.md 3절과 같다. */
+/** closet.garments, closet.garment_defects, closet.wears (db/migration V1~V4). */
 @Repository
 class GarmentRepository {
 
@@ -19,14 +19,14 @@ class GarmentRepository {
         this.jdbc = jdbc;
     }
 
-    /** pattern은 description(jsonb)에서 꺼낸 clothes_inspect 값(없으면 null). */
+    /** pattern은 clothes_inspect가 준 무늬(없으면 null). */
     record Match(String id, String name, String tone, String pattern, double similarity) {
     }
 
     /** 같은 옷 후보: 내 옷 중 종류·색 계열이 같은 것을 가까운 순으로 몇 개. */
     List<Match> nearestSame(UUID userId, String category, String colorFamily, float[] q, int limit) {
         return jdbc.sql("""
-                        SELECT id, name, tone, description ->> 'pattern' AS pattern, 1 - (embedding <=> CAST(:q AS public.vector)) AS similarity FROM closet.garments
+                        SELECT id, name, tone, pattern, 1 - (embedding <=> CAST(:q AS public.vector)) AS similarity FROM closet.garments
                          WHERE user_id = :userId AND category = :category AND color_family = :colorFamily AND embedding IS NOT NULL
                          ORDER BY embedding <=> CAST(:q AS public.vector) LIMIT :limit""")
                 .param("q", Vectors.literal(q)).param("userId", userId)
@@ -64,34 +64,84 @@ class GarmentRepository {
                 .query(Integer.class).single();
     }
 
-    void insert(String id, UUID userId, Garment.Normalized g, String descriptionJson, float[] embedding, OffsetDateTime now) {
+    /** description(jsonb) 대신 칸으로 나눈 clothes_inspect 값(V4). */
+    record Details(String pattern, String patternCheckedBy, String patternGuess, String material, String notes,
+                   String subColorName, String subColorFamily, List<DefectRow> defects) {
+    }
+
+    record DefectRow(String kind, String location, Double confidence, String checkedBy) {
+    }
+
+    void insert(String id, UUID userId, Garment.Normalized g, Details d, float[] embedding, OffsetDateTime now) {
         jdbc.sql("""
                         INSERT INTO closet.garments (id, user_id, category, name, color_name, color_family, tone, formality,
-                                              description, embedding, first_seen_at, last_seen_at, created_at, updated_at)
+                                              pattern, pattern_checked_by, pattern_guess, material, notes, sub_color_name, sub_color_family,
+                                              embedding, first_seen_at, last_seen_at, created_at, updated_at)
                         VALUES (:id, :userId, :category, :name, :colorName, :colorFamily, :tone, :formality,
-                                CAST(:description AS jsonb), CAST(:embedding AS public.vector), :now, :now, :now, :now)""")
+                                :pattern, :patternCheckedBy, :patternGuess, :material, :notes, :subColorName, :subColorFamily,
+                                CAST(:embedding AS public.vector), :now, :now, :now, :now)""")
                 .param("id", id).param("userId", userId)
                 .param("category", g.category()).param("name", g.name()).param("colorName", g.colorName())
                 .param("colorFamily", g.colorFamily()).param("tone", g.tone()).param("formality", g.formality())
-                .param("description", descriptionJson)
+                .params(detailParams(d))
                 .param("embedding", embedding == null ? null : Vectors.literal(embedding))
                 .param("now", now)
                 .update();
+        replaceDefects(id, d.defects());
     }
 
     /** 같은 옷을 다시 봤을 때: 마지막으로 본 설명으로 바꾼다(종류·색 계열은 같으므로 그대로). */
-    void update(String id, UUID userId, Garment.Normalized g, String descriptionJson, float[] embedding, OffsetDateTime now) {
-        jdbc.sql("""
+    void update(String id, UUID userId, Garment.Normalized g, Details d, float[] embedding, OffsetDateTime now) {
+        int n = jdbc.sql("""
                         UPDATE closet.garments SET name = :name, color_name = :colorName, tone = :tone,
                                formality = CASE WHEN :formality = 'unknown' THEN formality ELSE :formality END,
-                               description = CAST(:description AS jsonb), embedding = COALESCE(CAST(:embedding AS public.vector), embedding),
+                               pattern = :pattern, pattern_checked_by = :patternCheckedBy, pattern_guess = :patternGuess,
+                               material = :material, notes = :notes, sub_color_name = :subColorName, sub_color_family = :subColorFamily,
+                               embedding = COALESCE(CAST(:embedding AS public.vector), embedding),
                                last_seen_at = GREATEST(last_seen_at, :now), updated_at = :now
                          WHERE id = :id AND user_id = :userId""")
                 .param("id", id).param("userId", userId)
                 .param("name", g.name()).param("colorName", g.colorName()).param("tone", g.tone())
-                .param("formality", g.formality()).param("description", descriptionJson)
+                .param("formality", g.formality()).params(detailParams(d))
                 .param("embedding", embedding == null ? null : Vectors.literal(embedding)).param("now", now)
                 .update();
+        if (n > 0) {
+            replaceDefects(id, d.defects());
+        }
+    }
+
+    private static Map<String, Object> detailParams(Details d) {
+        var m = new java.util.HashMap<String, Object>();
+        m.put("pattern", d.pattern());
+        m.put("patternCheckedBy", d.patternCheckedBy());
+        m.put("patternGuess", d.patternGuess());
+        m.put("material", d.material());
+        m.put("notes", d.notes());
+        m.put("subColorName", d.subColorName());
+        m.put("subColorFamily", d.subColorFamily());
+        return m;
+    }
+
+    /** 얼룩·찢어짐은 마지막으로 본 상태로 바꾼다. */
+    private void replaceDefects(String garmentId, List<DefectRow> defects) {
+        jdbc.sql("DELETE FROM closet.garment_defects WHERE garment_id = :id").param("id", garmentId).update();
+        for (DefectRow r : defects) {
+            jdbc.sql("""
+                            INSERT INTO closet.garment_defects (garment_id, kind, location, confidence, checked_by)
+                            VALUES (:id, :kind, :location, :confidence, :checkedBy)""")
+                    .param("id", garmentId).param("kind", r.kind()).param("location", r.location())
+                    .param("confidence", r.confidence()).param("checkedBy", r.checkedBy())
+                    .update();
+        }
+    }
+
+    /** 옷의 얼룩·찢어짐(테스트·확인용). */
+    List<DefectRow> defects(String garmentId) {
+        return jdbc.sql("SELECT kind, location, confidence, checked_by FROM closet.garment_defects WHERE garment_id = :id ORDER BY id")
+                .param("id", garmentId)
+                .query((rs, i) -> new DefectRow(rs.getString(1), rs.getString(2),
+                        rs.getObject(3) == null ? null : rs.getDouble(3), rs.getString(4)))
+                .list();
     }
 
     /** 이 사람 옷 중 있는 id만. */
@@ -102,7 +152,8 @@ class GarmentRepository {
 
     void recordWear(UUID userId, String garmentId, LocalDate day) {
         jdbc.sql("""
-                        INSERT INTO closet.wears (user_id, garment_id, worn_on) VALUES (:userId, :garmentId, :day)
+                        INSERT INTO closet.wears (garment_id, worn_on)
+                        SELECT id, :day FROM closet.garments WHERE id = :garmentId AND user_id = :userId
                         ON CONFLICT ON CONSTRAINT wears_garment_day_uq DO NOTHING""")
                 .param("userId", userId).param("garmentId", garmentId).param("day", day)
                 .update();
@@ -110,9 +161,10 @@ class GarmentRepository {
 
     /** 입은 날 목록(최근부터 limit개). garmentId가 있으면 그 옷을 입은 날만. */
     List<LocalDate> wornDays(UUID userId, LocalDate from, LocalDate to, String garmentId, int limit) {
-        String byGarment = garmentId == null ? "" : " AND garment_id = :garmentId";
-        var spec = jdbc.sql("SELECT DISTINCT worn_on FROM closet.wears WHERE user_id = :userId AND worn_on BETWEEN :from AND :to"
-                        + byGarment + " ORDER BY worn_on DESC LIMIT :limit")
+        String byGarment = garmentId == null ? "" : " AND w.garment_id = :garmentId";
+        var spec = jdbc.sql("SELECT DISTINCT w.worn_on FROM closet.wears w JOIN closet.garments g ON g.id = w.garment_id"
+                        + " WHERE g.user_id = :userId AND w.worn_on BETWEEN :from AND :to"
+                        + byGarment + " ORDER BY w.worn_on DESC LIMIT :limit")
                 .param("userId", userId).param("from", from).param("to", to).param("limit", limit);
         if (garmentId != null) {
             spec = spec.param("garmentId", garmentId);
@@ -127,8 +179,8 @@ class GarmentRepository {
     List<WornRow> wornOn(UUID userId, Collection<LocalDate> days) {
         return jdbc.sql("""
                         SELECT w.worn_on, g.id, g.category, g.name, g.color_name, g.formality
-                          FROM closet.wears w JOIN closet.garments g ON g.id = w.garment_id AND g.user_id = w.user_id
-                         WHERE w.user_id = :userId AND w.worn_on IN (:days)
+                          FROM closet.wears w JOIN closet.garments g ON g.id = w.garment_id
+                         WHERE g.user_id = :userId AND w.worn_on IN (:days)
                          ORDER BY w.worn_on DESC, array_position(ARRAY['outer','top','dress','bottom','shoes','other']::varchar[], g.category), g.id""")
                 .param("userId", userId).param("days", days)
                 .query((rs, i) -> new WornRow(rs.getObject("worn_on", LocalDate.class), rs.getString("id"), rs.getString("category"),
@@ -159,7 +211,7 @@ class GarmentRepository {
     List<Candidate> rankedForUser(UUID userId, float[] q, Collection<String> excludeIds) {
         String exclude = excludeIds.isEmpty() ? "" : " AND g.id NOT IN (:exclude)";
         var spec = jdbc.sql("""
-                        SELECT g.id, g.category, g.name, g.color_name, g.color_family, g.tone, g.formality, g.description ->> 'material' AS material,
+                        SELECT g.id, g.category, g.name, g.color_name, g.color_family, g.tone, g.formality, g.material,
                                (SELECT max(w.worn_on) FROM closet.wears w WHERE w.garment_id = g.id) AS last_worn_on,
                                1 - (g.embedding <=> CAST(:q AS public.vector)) AS similarity
                           FROM closet.garments g
@@ -223,7 +275,7 @@ class GarmentRepository {
 
     java.util.Optional<Brief> brief(UUID userId, String id) {
         return jdbc.sql("""
-                        SELECT id, name, color_name, description ->> 'pattern' AS pattern, description ->> 'material' AS material,
+                        SELECT id, name, color_name, pattern, material,
                                thumbnail
                           FROM closet.garments WHERE user_id = :userId AND id = :id""")
                 .param("userId", userId).param("id", id)
@@ -254,8 +306,20 @@ class GarmentRepository {
     void mergeInto(UUID userId, String from, String into) {
         jdbc.sql("""
                         UPDATE closet.wears SET garment_id = :into, updated_at = now()
-                         WHERE user_id = :userId AND garment_id = :from
+                         WHERE garment_id = :from
+                           AND EXISTS (SELECT 1 FROM closet.garments g WHERE g.id = :from AND g.user_id = :userId)
                            AND worn_on NOT IN (SELECT worn_on FROM closet.wears WHERE garment_id = :into)""")
+                .param("userId", userId).param("from", from).param("into", into).update();
+        // 얼룩·찢어짐도 설명처럼 더 최근에 본 쪽을 남긴다(garments를 고치기 전에 last_seen_at으로 가른다)
+        jdbc.sql("""
+                        WITH newer AS (
+                          SELECT 1 FROM closet.garments f, closet.garments t
+                           WHERE f.id = :from AND t.id = :into AND f.user_id = :userId AND t.user_id = :userId
+                             AND f.last_seen_at >= t.last_seen_at),
+                        gone AS (
+                          DELETE FROM closet.garment_defects WHERE garment_id = :into AND EXISTS (SELECT 1 FROM newer))
+                        UPDATE closet.garment_defects SET garment_id = :into
+                         WHERE garment_id = :from AND EXISTS (SELECT 1 FROM newer)""")
                 .param("userId", userId).param("from", from).param("into", into).update();
         jdbc.sql("""
                         UPDATE closet.garments t SET
@@ -263,7 +327,13 @@ class GarmentRepository {
                                color_name = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.color_name ELSE t.color_name END,
                                tone = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.tone ELSE t.tone END,
                                formality = CASE WHEN f.last_seen_at >= t.last_seen_at AND f.formality <> 'unknown' THEN f.formality ELSE t.formality END,
-                               description = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.description ELSE t.description END,
+                               pattern = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.pattern ELSE t.pattern END,
+                               pattern_checked_by = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.pattern_checked_by ELSE t.pattern_checked_by END,
+                               pattern_guess = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.pattern_guess ELSE t.pattern_guess END,
+                               material = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.material ELSE t.material END,
+                               notes = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.notes ELSE t.notes END,
+                               sub_color_name = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.sub_color_name ELSE t.sub_color_name END,
+                               sub_color_family = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.sub_color_family ELSE t.sub_color_family END,
                                embedding = CASE WHEN f.last_seen_at >= t.last_seen_at THEN COALESCE(f.embedding, t.embedding) ELSE t.embedding END,
                                thumbnail = CASE WHEN f.thumbnail IS NOT NULL AND (t.thumbnail IS NULL OR f.thumbnail_at >= t.thumbnail_at)
                                                 THEN f.thumbnail ELSE t.thumbnail END,

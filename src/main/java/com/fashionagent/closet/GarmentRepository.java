@@ -208,17 +208,19 @@ class GarmentRepository {
     }
 
     /** 내 옷 전부를 질문과 가까운 순으로(한 사람 100벌 안팎이라 정확한 거리로 다 훑는다, research R3). */
-    List<Candidate> rankedForUser(UUID userId, float[] q, Collection<String> excludeIds) {
+    /** 앞날로 기록한 코디(worn_on > today)는 아직 안 입었으니 마지막으로 입은 날에 넣지 않는다. */
+    List<Candidate> rankedForUser(UUID userId, float[] q, Collection<String> excludeIds, LocalDate today) {
         String exclude = excludeIds.isEmpty() ? "" : " AND g.id NOT IN (:exclude)";
         var spec = jdbc.sql("""
                         SELECT g.id, g.category, g.name, g.color_name, g.color_family, g.tone, g.formality, g.material,
-                               (SELECT max(w.worn_on) FROM closet.wears w WHERE w.garment_id = g.id) AS last_worn_on,
+                               (SELECT max(w.worn_on) FROM closet.wears w
+                                 WHERE w.garment_id = g.id AND w.worn_on <= :today) AS last_worn_on,
                                1 - (g.embedding <=> CAST(:q AS public.vector)) AS similarity
                           FROM closet.garments g
                          WHERE g.user_id = :userId AND g.embedding IS NOT NULL""" + exclude + """
 
                          ORDER BY g.embedding <=> CAST(:q AS public.vector)""")
-                .param("q", Vectors.literal(q)).param("userId", userId);
+                .param("q", Vectors.literal(q)).param("userId", userId).param("today", today);
         if (!excludeIds.isEmpty()) {
             spec = spec.param("exclude", excludeIds);
         }
@@ -233,18 +235,20 @@ class GarmentRepository {
     }
 
     /** 옷장 목록: 종류 순(겉옷·상의·원피스·하의·신발·기타), 같은 종류는 최근에 본 것부터. */
-    List<Listed> listForUser(UUID userId, String category, int limit) {
+    /** 앞날로 기록한 코디는 입은 날·입은 횟수에 세지 않는다. */
+    List<Listed> listForUser(UUID userId, String category, int limit, LocalDate today) {
         String cat = category == null ? "" : " AND g.category = :category";
         var spec = jdbc.sql("""
                         SELECT g.id, g.category, g.name, g.color_name, g.formality,
                                max(w.worn_on) AS last_worn_on, count(w.worn_on) AS wear_count
-                          FROM closet.garments g LEFT JOIN closet.wears w ON w.garment_id = g.id
+                          FROM closet.garments g
+                          LEFT JOIN closet.wears w ON w.garment_id = g.id AND w.worn_on <= :today
                          WHERE g.user_id = :userId""" + cat + " " + """
                          GROUP BY g.id
                          ORDER BY array_position(ARRAY['outer','top','dress','bottom','shoes','other']::varchar[], g.category),
                                   g.last_seen_at DESC, g.id
                          LIMIT :limit""")
-                .param("userId", userId).param("limit", limit);
+                .param("userId", userId).param("limit", limit).param("today", today);
         if (category != null) {
             spec = spec.param("category", category);
         }

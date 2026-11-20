@@ -217,7 +217,7 @@ agent가 `imageQuery`에 찾는 옷을 짧은 영어로 주면(예: `warm winter
 
 ## 테스트
 
-- `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.
+- `ClosetIntegrationTest`(통합 테스트, 예전 `McpServerTest`): 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. 앞쪽 `US…` 테스트는 앱 레포 `specs/003-closet/spec.md`(와 005 US1·US2)의 Given/When/Then 시나리오 그대로, 이름은 `@DisplayName("US1-2 Given … When … Then …")`. Docker가 없으면 `TEST_DB_URL`(pgvector가 깔린 DB)로 붙고, 둘 다 없으면 건너뜀.
 - `E5OnnxEmbeddingModelTest`: `CLOSET_E5_DIR`(model.onnx, tokenizer.json)이 있을 때만.
 - 나머지는 순수 단위 테스트. 모두 26개(실제 e5 3개 포함).
 

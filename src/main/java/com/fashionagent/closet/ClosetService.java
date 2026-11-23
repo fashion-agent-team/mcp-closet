@@ -101,7 +101,6 @@ public class ClosetService {
         }
         var normalized = new ArrayList<Garment.Normalized>();
         var imgs = new ArrayList<float[]>();
-        var guesses = new ArrayList<ImageLabels.Guess>();
         for (Garment g : input) {
             if (g == null) {
                 throw ClosetException.badRequest("garments에 빈 값이 있어요.");
@@ -111,7 +110,6 @@ public class ClosetService {
             ImageLabels.Guess guess = img != null && model.equals(labels.model()) ? labels.guess(img, n.category(), n.name(), n.colorFamily()) : null;
             normalized.add(guess == null ? n : n.withImageGuess(guess));
             imgs.add(img);
-            guesses.add(guess);
         }
         List<float[]> vectors = embedAll(normalized.stream().map(Labels::passage).toList());
 
@@ -127,7 +125,6 @@ public class ClosetService {
             Garment.Normalized n = normalized.get(i);
             float[] v = vectors == null ? null : vectors.get(i);
             float[] img = imgs.get(i);
-            ImageLabels.Guess guess = guesses.get(i);
             boolean force = g.id() != null && forceNew.contains(g.id().trim());
 
             String matchId = null;

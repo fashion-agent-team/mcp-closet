@@ -20,19 +20,29 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.testcontainers.junit.jupiter.Testcontainers;
+import org.junit.jupiter.api.condition.EnabledIf;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import java.time.LocalDate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * 실제로 서버와 PostgreSQL(pgvector)을 띄우고 MCP 클라이언트로 /mcp에 붙어 본다(agent가 붙는 방식과 같음).
- * 임베딩은 모델 없이 도는 hash를 쓴다(뜻은 모르지만 같은 글은 같은 벡터). Docker가 없으면 건너뛴다.
+ * 통합 테스트: 서버 전체와 진짜 PostgreSQL(pgvector)을 띄우고 MCP 클라이언트로 /mcp에 붙어 본다(agent가 붙는 방식과 같음).
+ * 임베딩은 모델 없이 도는 hash를 쓴다(뜻은 모르지만 같은 글은 같은 벡터).
+ * 앞쪽 "US…" 테스트는 앱 레포 specs/003-closet/spec.md(와 005-database US1·US2)의 Given/When/Then 시나리오 그대로이고,
+ * 뒤쪽은 같은 옷 판단·검색 규칙을 더 자세히 확인한다. DB가 없으면(TestDb#available) 건너뛴다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {"closet.embedding.provider=hash", "closet.image.adapter-path="})
 @Import(TestDb.class)
-@Testcontainers(disabledWithoutDocker = true)
-class McpServerTest {
+@EnabledIf("com.fashionagent.closet.TestDb#available")
+class ClosetIntegrationTest {
+
+    @DynamicPropertySource
+    static void db(DynamicPropertyRegistry r) {
+        TestDb.register(r);
+    }
 
     @LocalServerPort
     int port;
@@ -60,6 +70,179 @@ class McpServerTest {
     void close() {
         client.closeGracefully();
     }
+
+    // ---- spec 시나리오 (도구 입력은 Map 대신 record를 JSON으로 바꿔 보냄) ----
+
+    record SaveArgs(String userId, List<Garment> garments) {
+    }
+
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    record SearchArgs(String userId, String situation, String occasion, Double apparentTemperature,
+            List<String> excludeGarmentIds, Integer limit) {
+    }
+
+    record WearArgs(String userId, List<String> garmentIds, String date) {
+    }
+
+    static Garment seen(String id, String category, String name, String colorName, String family, String tone,
+            String formality) {
+        return new Garment(id, category, name, colorName, family, tone, null, null, null, formality, null, null, "center",
+                0.9, null, null, null, null, null, null);
+    }
+
+    JsonNode callArgs(String tool, Object args) {
+        Map<String, Object> map = json.convertValue(args, new tools.jackson.core.type.TypeReference<Map<String, Object>>() {
+        });
+        return call(tool, map);
+    }
+
+    String save(Garment g) {
+        return callArgs("closet_save", new SaveArgs(user, List.of(g))).get("saved").get(0).get("garmentId").asString();
+    }
+
+    @Test
+    @DisplayName("US1-1 Given 처음 보는 옷 When 마무리하면 Then 새 옷으로 저장되고 isNew=true")
+    void us1_1_newGarment() {
+        // when
+        JsonNode r = callArgs("closet_save", new SaveArgs(user, List.of(seen("g1", "top", "니트", "차콜 그레이", "gray", "dark", "smart"))));
+
+        // then
+        assertThat(r.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = ?::uuid").param(user).query(Long.class).single())
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("US1-2 Given 전에 저장한 셔츠와 종류·색이 같고 매우 비슷함 When 마무리하면 Then 기존 옷에 합치고 마지막으로 본 시각만 바뀐다")
+    void us1_2_sameGarmentMerges() {
+        // given
+        String shirt = save(seen("g1", "top", "셔츠", "흰색", "white", "light", "smart"));
+        jdbc.sql("UPDATE closet.garments SET first_seen_at = '2026-11-01T05:00:00Z', last_seen_at = '2026-11-01T05:00:00Z' WHERE id = ?")
+                .param(shirt).update();
+
+        // when
+        JsonNode r = callArgs("closet_save", new SaveArgs(user, List.of(seen("g9", "top", "셔츠", "흰색", "white", "light", "smart"))));
+
+        // then
+        assertThat(r.get("saved").get(0).get("garmentId").asString()).isEqualTo(shirt);
+        assertThat(r.get("saved").get(0).get("isNew").asBoolean()).isFalse();
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = ?::uuid").param(user).query(Long.class).single())
+                .isEqualTo(1);
+        assertThat(jdbc.sql("SELECT last_seen_at > first_seen_at FROM closet.garments WHERE id = ?").param(shirt)
+                .query(Boolean.class).single()).isTrue();
+    }
+
+    @Test
+    @DisplayName("US1-3 Given 같은 색 다른 종류(셔츠와 니트) When 마무리하면 Then 합치지 않는다")
+    void us1_3_differentCategoryNotMerged() {
+        // given
+        String shirt = save(seen("g1", "top", "셔츠", "회색", "gray", "mid", "smart"));
+
+        // when
+        JsonNode r = callArgs("closet_save", new SaveArgs(user, List.of(seen("g2", "top", "니트", "회색", "gray", "mid", "smart"))));
+
+        // then
+        assertThat(r.get("saved").get(0).get("isNew").asBoolean()).isTrue();
+        assertThat(r.get("saved").get(0).get("garmentId").asString()).isNotEqualTo(shirt);
+    }
+
+    @Test
+    @DisplayName("US2-1·US2-2·005 US2-2 Given 옷 두 벌 When 오늘 입었다고 기록하고 한 번 더 기록하면 Then 두 건만 남는다(하루 한 번)")
+    void us2_wearOncePerDay() {
+        // given
+        String top = save(seen("g1", "top", "셔츠", "흰색", "white", "light", "smart"));
+        String bottom = save(seen("g2", "bottom", "슬랙스", "검은색", "black", "dark", "formal"));
+
+        // when
+        callArgs("closet_wear", new WearArgs(user, List.of(top, bottom), "2026-11-04"));
+        callArgs("closet_wear", new WearArgs(user, List.of(top), "2026-11-04"));
+
+        // then
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.wears WHERE garment_id IN (?, ?)").params(top, bottom)
+                .query(Long.class).single()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("US3-1 Given 옷장에 옷이 있음 When 상황·자리·체감 온도로 찾으면 Then 정한 수만큼 후보와 마지막으로 입은 날을 받는다")
+    void us3_1_searchWithLastWorn() {
+        // given
+        String shirt = save(seen("g1", "top", "셔츠", "흰색", "white", "light", "formal"));
+        save(seen("g2", "bottom", "슬랙스", "검은색", "black", "dark", "formal"));
+        save(seen("g3", "top", "후드티", "회색", "gray", "mid", "casual"));
+        callArgs("closet_wear", new WearArgs(user, List.of(shirt), "2026-11-01"));
+
+        // when
+        JsonNode r = callArgs("closet_search", new SearchArgs(user, "오늘 오전 면접, 체감 9도", "formal", 9.5, null, 2));
+
+        // then
+        assertThat(r.get("empty").asBoolean()).isFalse();
+        assertThat(r.get("candidates").size()).isEqualTo(2);
+        assertThat(find(r, shirt).get("lastWorn").asString()).isEqualTo("2026-11-01");
+    }
+
+    @Test
+    @DisplayName("US3-2 Given 빼고 싶은 옷 목록 When 찾으면 Then 그 옷은 후보에 없다")
+    void us3_2_excluded() {
+        // given
+        String yesterday = save(seen("g1", "top", "셔츠", "흰색", "white", "light", "smart"));
+        save(seen("g2", "top", "니트", "남색", "navy", "dark", "smart"));
+
+        // when
+        JsonNode r = callArgs("closet_search", new SearchArgs(user, "출근", "business", null, List.of(yesterday), null));
+
+        // then
+        List<String> ids = new ArrayList<>();
+        r.get("candidates").forEach(c -> ids.add(c.get("garmentId").asString()));
+        assertThat(ids).isNotEmpty().doesNotContain(yesterday);
+    }
+
+    @Test
+    @DisplayName("US3-3 Given 옷장이 비어 있음 When 찾으면 Then 빈 후보와 코디 지식만 받고 empty=true")
+    void us3_3_emptyCloset() {
+        // when
+        JsonNode r = callArgs("closet_search", new SearchArgs(user, "오늘 오전 면접, 체감 9도", "formal", 9.5, null, null));
+
+        // then
+        assertThat(r.get("empty").asBoolean()).isTrue();
+        assertThat(r.get("candidates").size()).isZero();
+        assertThat(r.get("styleNotes").size()).isPositive();
+    }
+
+    @Test
+    @DisplayName("005 US2-3 Given 사용자 A·B에게 같은 셔츠 When A로 찾으면 Then B의 옷은 0건")
+    void db_us2_3_otherUserIsolated() {
+        // given
+        String mine = save(seen("g1", "top", "셔츠", "흰색", "white", "light", "smart"));
+        String me = user;
+        user = UUID.randomUUID().toString();
+        String theirs = save(seen("g1", "top", "셔츠", "흰색", "white", "light", "smart"));
+        user = me;
+
+        // when
+        JsonNode r = callArgs("closet_search", new SearchArgs(user, "출근", "business", null, null, null));
+
+        // then
+        List<String> ids = new ArrayList<>();
+        r.get("candidates").forEach(c -> ids.add(c.get("garmentId").asString()));
+        assertThat(ids).contains(mine).doesNotContain(theirs);
+    }
+
+    @Test
+    @DisplayName("005 US1-2 Given Flyway가 closet 스키마를 만듦 When 외래 키를 보면 Then 다른 스키마를 가리키는 FK는 0개")
+    void db_us1_2_noCrossSchemaFk() {
+        // when
+        Long crossSchema = jdbc.sql("""
+                SELECT count(*) FROM pg_constraint c
+                JOIN pg_namespace n ON n.oid = c.connamespace
+                JOIN pg_class ref ON ref.oid = c.confrelid
+                WHERE c.contype = 'f' AND n.nspname = 'closet' AND ref.relnamespace <> c.connamespace""")
+                .query(Long.class).single();
+
+        // then
+        assertThat(crossSchema).isZero();
+    }
+
+    // ---- 같은 옷 판단·검색 규칙 자세히 ----
 
     @Test
     @DisplayName("tools list에 closet 도구 4개가 있고 필수 입력이 맞다")
@@ -130,11 +313,16 @@ class McpServerTest {
 
         assertThat(jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = CAST(:u AS uuid)").param("u", user)
                 .query(Integer.class).single()).isEqualTo(3);
-        String desc = jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", knit)
-                .query(String.class).single();
-        assertThat(desc).contains("stain", "오른쪽 소매 끝");
-        assertThat(jdbc.sql("SELECT description ->> 'id' FROM closet.garments WHERE id = :id").param("id", knit)
-                .query(String.class).single()).isEqualTo(knit);
+        // 얼룩은 garment_defects에 한 줄씩(V4 정규화)
+        assertThat(jdbc.sql("SELECT kind || '/' || location || '/' || confidence FROM closet.garment_defects WHERE garment_id = :id")
+                .param("id", knit).query(String.class).list()).containsExactly("stain/오른쪽 소매 끝/0.850");
+        assertThat(jdbc.sql("SELECT material FROM closet.garments WHERE id = :id").param("id", knit)
+                .query(String.class).single()).isEqualTo("니트 같음");
+        // 다음에 얼룩 없이 다시 보면 얼룩 줄도 마지막 상태(없음)로 바뀐다
+        call("closet_save", Map.of("userId", user, "garments", List.of(
+                garment("g9", "top", "니트", "차콜 그레이", "gray", "dark", "smart", "니트 같음"))));
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.garment_defects WHERE garment_id = :id").param("id", knit)
+                .query(Integer.class).single()).isZero();
 
         // 다른 사람 옷장과는 합치지 않는다
         String other = UUID.randomUUID().toString();
@@ -164,9 +352,6 @@ class McpServerTest {
         assertThat(r2.get("saved").get(0).get("isNew").asBoolean()).isFalse();
         assertThat(jdbc.sql("SELECT image_count FROM closet.garments WHERE id = :id").param("id", a).query(Integer.class).single())
                 .isEqualTo(2);
-        // 사진 벡터는 description(jsonb)에 넣지 않는다
-        assertThat(jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", a).query(String.class).single())
-                .doesNotContain("embedding");
 
         var other = garment("g1", "top", "반팔 티셔츠", "흰색", "white", "light", "casual", "면");
         other.put("embedding", shirtB);
@@ -218,9 +403,6 @@ class McpServerTest {
         assertThat(s2.get("maybeSameAs").get("thumbnail").asString()).isEqualTo(jpeg);
         assertThat(s2.get("maybeSameAs").get("similarity").asDouble()).isBetween(0.83, 0.85);
         String dup = s2.get("garmentId").asString();
-        // 작은 사진은 description(jsonb)에 넣지 않는다
-        assertThat(jdbc.sql("SELECT description::text FROM closet.garments WHERE id = :id").param("id", coat).query(String.class).single())
-                .doesNotContain("thumbnail");
 
         call("closet_wear", Map.of("userId", user, "garmentIds", List.of(dup), "date", "2026-11-02"));
         JsonNode m = call("closet_merge", Map.of("userId", user, "garmentId", dup, "intoGarmentId", coat));
@@ -346,8 +528,42 @@ class McpServerTest {
         assertThat(mixed.get("error").get("code").asString()).isEqualTo("not_found");
         assertThat(jdbc.sql("SELECT count(*) FROM closet.wears").query(Integer.class).single()).isEqualTo(2);
 
-        JsonNode future = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(a), "date", "2026-12-25"));
-        assertThat(future.get("error").get("code").asString()).isEqualTo("bad_request");
+        // 테스트 시계는 2026-11-04. 366일 뒤(2027-11-05)까지 받고 367일 뒤는 잘못 들은 날짜로 본다.
+        JsonNode tooFar = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(a), "date", "2027-11-06"));
+        assertThat(tooFar.get("error").get("code").asString()).isEqualTo("bad_request");
+    }
+
+    @Test
+    @DisplayName("앞날 코디 기록: 모레·12월 25일로 고른 옷도 기록되고, 아직 안 입었으니 lastWorn·입은 횟수·최근 감점엔 안 센다")
+    void wearPlannedDay() {
+        // given
+        String shirt = saveOne("top", "셔츠", "흰색", "white", "light", "smart");
+        String slacks = saveOne("bottom", "슬랙스", "남색", "navy", "dark", "formal");
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt), "date", "2026-11-01"));
+
+        // when
+        JsonNode dayAfter = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt, slacks), "date", "2026-11-06"));
+        JsonNode christmas = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(slacks), "date", "2026-12-25"));
+        JsonNode lastDay = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(slacks), "date", "2027-11-05"));
+
+        // then
+        assertThat(dayAfter.get("recorded").asInt()).isEqualTo(2);
+        assertThat(christmas.get("recorded").asInt()).isEqualTo(1);
+        assertThat(lastDay.get("recorded").asInt()).isEqualTo(1);
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.wears").query(Integer.class).single()).isEqualTo(5);
+
+        JsonNode list = call("closet_list", Map.of("userId", user));
+        JsonNode shirtOut = findIn(list, "garments", shirt);
+        JsonNode slacksOut = findIn(list, "garments", slacks);
+        assertThat(shirtOut.get("lastWorn").asString()).isEqualTo("2026-11-01");
+        assertThat(shirtOut.get("wearCount").asInt()).isEqualTo(1);
+        assertThat(slacksOut.path("lastWorn").isMissingNode() || slacksOut.path("lastWorn").isNull()).isTrue();
+        assertThat(slacksOut.get("wearCount").asInt()).isZero();
+
+        JsonNode search = call("closet_search", Map.of("userId", user, "situation", "회사 출근, 체감 15도", "occasion", "business", "limit", 10));
+        JsonNode slacksCand = find(search, slacks);
+        assertThat(slacksCand.path("lastWorn").isMissingNode() || slacksCand.path("lastWorn").isNull()).isTrue();
+        assertThat(find(search, shirt).get("lastWorn").asString()).isEqualTo("2026-11-01");
     }
 
     @Test
@@ -479,7 +695,11 @@ class McpServerTest {
     }
 
     private JsonNode find(JsonNode r, String id) {
-        for (JsonNode c : r.get("candidates")) {
+        return findIn(r, "candidates", id);
+    }
+
+    private JsonNode findIn(JsonNode r, String field, String id) {
+        for (JsonNode c : r.get(field)) {
             if (c.get("garmentId").asString().equals(id)) {
                 return c;
             }

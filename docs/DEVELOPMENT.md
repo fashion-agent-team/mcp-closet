@@ -196,7 +196,7 @@ agent가 `imageQuery`에 찾는 옷을 짧은 영어로 주면(예: `warm winter
 
 ## closet_wear
 
-`garmentIds`가 모두 이 사람 옷이어야 기록합니다. 하나라도 없거나 남의 옷이면 `not_found`이고 아무것도 기록하지 않습니다(agent는 closet_save가 준 id만 넘기므로 섞이면 버그). 같은 옷 같은 날은 한 번만(`ON CONFLICT DO NOTHING`). `date`가 없으면 서울 기준 오늘, 내일보다 뒤면 `bad_request`.
+`garmentIds`가 모두 이 사람 옷이어야 기록합니다. 하나라도 없거나 남의 옷이면 `not_found`이고 아무것도 기록하지 않습니다(agent는 closet_save가 준 id만 넘기므로 섞이면 버그). 같은 옷 같은 날은 한 번만(`ON CONFLICT DO NOTHING`). `date`가 없으면 서울 기준 오늘. "모레·12월 25일 뭐 입지"로 고른 옷도 기록하도록 오늘부터 366일 뒤까지 받고, 그보다 뒤면 `bad_request`. 앞날로 기록한 줄은 아직 안 입었으므로 `closet_list`의 마지막으로 입은 날·입은 횟수와 `closet_search`의 최근 입은 옷 감점에 세지 않습니다.
 
 ## 잰 숫자 (2026-11-05, 개발 컨테이너, 옷 10벌)
 
@@ -217,7 +217,7 @@ agent가 `imageQuery`에 찾는 옷을 짧은 영어로 주면(예: `warm winter
 
 ## 테스트
 
-- `McpServerTest`: 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. Docker 없으면 건너뜀.
+- `ClosetIntegrationTest`(통합 테스트, 예전 `McpServerTest`): 서버 + pgvector(Testcontainers)를 띄우고 MCP 클라이언트로 `/mcp`에 붙음. 임베딩은 hash. 앞쪽 `US…` 테스트는 앱 레포 `specs/003-closet/spec.md`(와 005 US1·US2)의 Given/When/Then 시나리오 그대로, 이름은 `@DisplayName("US1-2 Given … When … Then …")`. Docker가 없으면 `TEST_DB_URL`(pgvector가 깔린 DB)로 붙고, 둘 다 없으면 건너뜀.
 - `E5OnnxEmbeddingModelTest`: `CLOSET_E5_DIR`(model.onnx, tokenizer.json)이 있을 때만.
 - 나머지는 순수 단위 테스트. 모두 26개(실제 e5 3개 포함).
 

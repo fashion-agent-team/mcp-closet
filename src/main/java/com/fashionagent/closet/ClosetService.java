@@ -180,7 +180,7 @@ public class ClosetService {
             if (matchId != null) {
                 // 이번 사진에서 무늬를 못 봤으면 전에 본 무늬를 남긴다(다음에 다른 무늬 옷과 가를 수 있게)
                 Garment kept = (g.pattern() == null || g.pattern().isBlank()) && keptPattern != null ? g.withPattern(keptPattern) : g;
-                garments.update(matchId, userId, n, describe(kept, matchId, guess), v, now);
+                garments.update(matchId, userId, n, details(kept), v, now);
                 garments.setThumbnail(matchId, userId, thumbnail(g.thumbnail()), now);
                 if (img != null) {
                     int max = props.image().maxCount();
@@ -195,7 +195,7 @@ public class ClosetService {
                 throw ClosetException.badRequest("옷장이 가득 찼어요(" + props.maxClosetSize() + "벌).");
             }
             String id = Ids.garmentId();
-            garments.insert(id, userId, n, describe(g, id, guess), v, now);
+            garments.insert(id, userId, n, details(g), v, now);
             garments.setThumbnail(id, userId, thumbnail(g.thumbnail()), now);
             if (img != null) {
                 garments.setImage(id, userId, model, img, 1);
@@ -240,21 +240,36 @@ public class ClosetService {
         return jpeg && b.length <= 49_152 ? b : null;
     }
 
-    /** description(jsonb)에는 받은 Garment 전체를 두되 id는 옷장 id로 바꾸고, 사진 벡터(숫자 768개)·작은 사진은 따로 두므로 뺀다. */
-    private String describe(Garment g, String garmentId, ImageLabels.Guess guess) {
-        Garment copy = new Garment(garmentId, g.category(), g.name(), g.colorName(), g.colorFamily(), g.tone(), g.pattern(),
-                g.material(), g.notes(), g.formality(), g.defects(), g.box(), g.position(), g.confidence(), null, null,
-                g.subColorName(), g.subColorFamily(), g.patternCheckedBy(), g.patternGuess());
-        if (guess == null) {
-            return json.writeValueAsString(copy);
+    /**
+     * 옷장에 남길 clothes_inspect 값(V4부터 칸과 garment_defects로 나눠 저장). 사진 속 위치·확신도는 그 사진 한 장의 값이라 남기지 않는다.
+     */
+    static GarmentRepository.Details details(Garment g) {
+        var defects = g.defects() == null ? List.<GarmentRepository.DefectRow>of() : g.defects().stream()
+                .filter(d -> d != null && d.kind() != null && !d.kind().isBlank())
+                .map(d -> new GarmentRepository.DefectRow(cut(d.kind(), 20), cut(d.where(), 50),
+                        d.confidence() == null || d.confidence() < 0 || d.confidence() > 1 ? null : d.confidence(),
+                        checkedBy(d.checkedBy())))
+                .toList();
+        String subFamily = g.subColorFamily() == null || g.subColorFamily().isBlank() ? null
+                : g.subColorFamily().trim().toLowerCase();
+        return new GarmentRepository.Details(cut(g.pattern(), 30), checkedBy(g.patternCheckedBy()), cut(g.patternGuess(), 30),
+                cut(g.material(), 50), cut(g.notes(), 500), cut(g.subColorName(), 30), cut(subFamily, 10), defects);
+    }
+
+    private static String checkedBy(String s) {
+        return s == null ? null : switch (s.trim().toLowerCase()) {
+            case "model" -> "model";
+            case "gpt" -> "gpt";
+            default -> null;
+        };
+    }
+
+    private static String cut(String s, int max) {
+        if (s == null || s.isBlank()) {
+            return null;
         }
-        // clothes_inspect가 준 값은 그대로 두고, 사진에서 고른 값은 imageGuess에 따로 남긴다
-        var node = (tools.jackson.databind.node.ObjectNode) json.valueToTree(copy);
-        var ig = node.putObject("imageGuess");
-        ig.put("name", guess.name());
-        ig.put("pattern", guess.pattern());
-        ig.put("formality", guess.formality());
-        return json.writeValueAsString(node);
+        String t = s.trim();
+        return t.length() <= max ? t : t.substring(0, max);
     }
 
     /** closet_wear. 남의 옷이나 없는 옷 id가 섞이면 아무것도 기록하지 않는다. */
@@ -284,6 +299,9 @@ public class ClosetService {
         return Map.of("recorded", ids.size());
     }
 
+    /** "모레", "12월 25일에 뭐 입지?"처럼 앞날 코디도 기록한다. 1년(윤년 포함) 넘게 앞은 잘못 들은 날짜로 본다. */
+    static final int MAX_DAYS_AHEAD = 366;
+
     private LocalDate parseDate(String date) {
         LocalDate today = LocalDate.now(clock.withZone(SEOUL));
         if (date == null || date.isBlank()) {
@@ -295,8 +313,8 @@ public class ClosetService {
         } catch (RuntimeException e) {
             throw ClosetException.badRequest("date는 2026-11-04 같은 모양이어야 해요.");
         }
-        if (day.isAfter(today.plusDays(1))) {
-            throw ClosetException.badRequest("앞으로의 날짜에는 입은 날을 기록할 수 없어요.");
+        if (day.isAfter(today.plusDays(MAX_DAYS_AHEAD))) {
+            throw ClosetException.badRequest("입을 날은 오늘부터 " + MAX_DAYS_AHEAD + "일 뒤까지만 기록할 수 있어요.");
         }
         return day;
     }
@@ -348,7 +366,7 @@ public class ClosetService {
         Map<String, Double> imageSim = imageSimilarities(userId, imageQuery);
         double w = props.image().text().weight();
         double fill = imageSim.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        var ranked = garments.rankedForUser(userId, q, exclude).stream()
+        var ranked = garments.rankedForUser(userId, q, exclude, today).stream()
                 .filter(g -> !CandidateFilter.excluded(g, occ, apparentTemperature))
                 .map(g -> g.withSimilarity(g.similarity() + (imageSim.isEmpty() ? 0 : w * imageSim.getOrDefault(g.id(), fill))
                         + CandidateFilter.formalityBonus(occ, g.formality())
@@ -469,8 +487,9 @@ public class ClosetService {
             throw ClosetException.badRequest("category는 top·bottom·outer·dress·shoes·other 중 하나여야 해요.");
         }
         int n = limit == null || limit <= 0 ? 50 : Math.min(limit, props.maxClosetSize());
+        LocalDate today = LocalDate.now(clock.withZone(SEOUL));
         var m = new LinkedHashMap<String, Object>();
-        m.put("garments", garments.listForUser(userId, cat, n));
+        m.put("garments", garments.listForUser(userId, cat, n, today));
         m.put("total", garments.countByUser(userId, cat));
         return m;
     }

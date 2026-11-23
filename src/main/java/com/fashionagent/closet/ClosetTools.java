@@ -63,7 +63,7 @@ public class ClosetTools {
     public Object closetWear(
             @ToolParam(description = "사용자 id(UUID). agent가 채웁니다.") String userId,
             @ToolParam(description = "closet_save가 돌려준 garmentId 목록. 예: c_17, c_03") List<String> garmentIds,
-            @ToolParam(required = false, description = "입은 날(YYYY-MM-DD, 서울 기준). 없으면 오늘") String date) {
+            @ToolParam(required = false, description = "입은 날 또는 입을 날(YYYY-MM-DD, 서울 기준). 없으면 오늘. '내일·모레·12월 25일 뭐 입지'로 고른 옷은 그날로. 오늘부터 366일 뒤까지") String date) {
         return run(() -> service.wear(Ids.userId(userId), garmentIds, date));
     }
 

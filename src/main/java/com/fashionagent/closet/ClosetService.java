@@ -299,6 +299,9 @@ public class ClosetService {
         return Map.of("recorded", ids.size());
     }
 
+    /** "모레", "12월 25일에 뭐 입지?"처럼 앞날 코디도 기록한다. 1년(윤년 포함) 넘게 앞은 잘못 들은 날짜로 본다. */
+    static final int MAX_DAYS_AHEAD = 366;
+
     private LocalDate parseDate(String date) {
         LocalDate today = LocalDate.now(clock.withZone(SEOUL));
         if (date == null || date.isBlank()) {
@@ -310,8 +313,8 @@ public class ClosetService {
         } catch (RuntimeException e) {
             throw ClosetException.badRequest("date는 2026-11-04 같은 모양이어야 해요.");
         }
-        if (day.isAfter(today.plusDays(1))) {
-            throw ClosetException.badRequest("앞으로의 날짜에는 입은 날을 기록할 수 없어요.");
+        if (day.isAfter(today.plusDays(MAX_DAYS_AHEAD))) {
+            throw ClosetException.badRequest("입을 날은 오늘부터 " + MAX_DAYS_AHEAD + "일 뒤까지만 기록할 수 있어요.");
         }
         return day;
     }
@@ -363,7 +366,7 @@ public class ClosetService {
         Map<String, Double> imageSim = imageSimilarities(userId, imageQuery);
         double w = props.image().text().weight();
         double fill = imageSim.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        var ranked = garments.rankedForUser(userId, q, exclude).stream()
+        var ranked = garments.rankedForUser(userId, q, exclude, today).stream()
                 .filter(g -> !CandidateFilter.excluded(g, occ, apparentTemperature))
                 .map(g -> g.withSimilarity(g.similarity() + (imageSim.isEmpty() ? 0 : w * imageSim.getOrDefault(g.id(), fill))
                         + CandidateFilter.formalityBonus(occ, g.formality())
@@ -484,8 +487,9 @@ public class ClosetService {
             throw ClosetException.badRequest("category는 top·bottom·outer·dress·shoes·other 중 하나여야 해요.");
         }
         int n = limit == null || limit <= 0 ? 50 : Math.min(limit, props.maxClosetSize());
+        LocalDate today = LocalDate.now(clock.withZone(SEOUL));
         var m = new LinkedHashMap<String, Object>();
-        m.put("garments", garments.listForUser(userId, cat, n));
+        m.put("garments", garments.listForUser(userId, cat, n, today));
         m.put("total", garments.countByUser(userId, cat));
         return m;
     }

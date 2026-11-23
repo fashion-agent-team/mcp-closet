@@ -528,8 +528,42 @@ class ClosetIntegrationTest {
         assertThat(mixed.get("error").get("code").asString()).isEqualTo("not_found");
         assertThat(jdbc.sql("SELECT count(*) FROM closet.wears").query(Integer.class).single()).isEqualTo(2);
 
-        JsonNode future = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(a), "date", "2026-12-25"));
-        assertThat(future.get("error").get("code").asString()).isEqualTo("bad_request");
+        // 테스트 시계는 2026-11-04. 366일 뒤(2027-11-05)까지 받고 367일 뒤는 잘못 들은 날짜로 본다.
+        JsonNode tooFar = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(a), "date", "2027-11-06"));
+        assertThat(tooFar.get("error").get("code").asString()).isEqualTo("bad_request");
+    }
+
+    @Test
+    @DisplayName("앞날 코디 기록: 모레·12월 25일로 고른 옷도 기록되고, 아직 안 입었으니 lastWorn·입은 횟수·최근 감점엔 안 센다")
+    void wearPlannedDay() {
+        // given
+        String shirt = saveOne("top", "셔츠", "흰색", "white", "light", "smart");
+        String slacks = saveOne("bottom", "슬랙스", "남색", "navy", "dark", "formal");
+        call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt), "date", "2026-11-01"));
+
+        // when
+        JsonNode dayAfter = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(shirt, slacks), "date", "2026-11-06"));
+        JsonNode christmas = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(slacks), "date", "2026-12-25"));
+        JsonNode lastDay = call("closet_wear", Map.of("userId", user, "garmentIds", List.of(slacks), "date", "2027-11-05"));
+
+        // then
+        assertThat(dayAfter.get("recorded").asInt()).isEqualTo(2);
+        assertThat(christmas.get("recorded").asInt()).isEqualTo(1);
+        assertThat(lastDay.get("recorded").asInt()).isEqualTo(1);
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.wears").query(Integer.class).single()).isEqualTo(5);
+
+        JsonNode list = call("closet_list", Map.of("userId", user));
+        JsonNode shirtOut = findIn(list, "garments", shirt);
+        JsonNode slacksOut = findIn(list, "garments", slacks);
+        assertThat(shirtOut.get("lastWorn").asString()).isEqualTo("2026-11-01");
+        assertThat(shirtOut.get("wearCount").asInt()).isEqualTo(1);
+        assertThat(slacksOut.path("lastWorn").isMissingNode() || slacksOut.path("lastWorn").isNull()).isTrue();
+        assertThat(slacksOut.get("wearCount").asInt()).isZero();
+
+        JsonNode search = call("closet_search", Map.of("userId", user, "situation", "회사 출근, 체감 15도", "occasion", "business", "limit", 10));
+        JsonNode slacksCand = find(search, slacks);
+        assertThat(slacksCand.path("lastWorn").isMissingNode() || slacksCand.path("lastWorn").isNull()).isTrue();
+        assertThat(find(search, shirt).get("lastWorn").asString()).isEqualTo("2026-11-01");
     }
 
     @Test
@@ -661,7 +695,11 @@ class ClosetIntegrationTest {
     }
 
     private JsonNode find(JsonNode r, String id) {
-        for (JsonNode c : r.get("candidates")) {
+        return findIn(r, "candidates", id);
+    }
+
+    private JsonNode findIn(JsonNode r, String field, String id) {
+        for (JsonNode c : r.get(field)) {
             if (c.get("garmentId").asString().equals(id)) {
                 return c;
             }

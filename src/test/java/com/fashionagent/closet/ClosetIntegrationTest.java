@@ -735,7 +735,7 @@ class ClosetIntegrationTest {
     }
 
     private JsonNode call(String tool, Map<String, Object> args) {
-        var result = client.callTool(new McpSchema.CallToolRequest(tool, args));
+        var result = client.callTool(McpSchema.CallToolRequest.builder(tool).arguments(args).build());
         String text = ((McpSchema.TextContent) result.content().get(0)).text();
         return json.readTree(text);
     }

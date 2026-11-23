@@ -19,7 +19,7 @@ final class Ids {
         return "c_" + URL.encodeToString(buf);
     }
 
-    /** userId는 게이트웨이가 준 UUID여야 한다(agent가 X-User-Id 값으로 덮어써서 넣음). */
+    /** userId는 UUID여야 한다(agent가 로그인 토큰에서 꺼낸 값으로 덮어써서 넣음). */
     static UUID userId(String value) {
         if (value == null || value.isBlank()) {
             throw ClosetException.badRequest("userId가 없어요.");

@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * MCP 도구 4개 (앱 레포 docs/contracts/mcp-tools.md "mcp-closet"). 실패해도 예외를 던지지 않고 {"error": {"code", "message"}}를 돌려준다.
- * userId는 GPT가 정하지 않고 agent가 X-User-Id 값으로 덮어써서 넣는다(약속 문서 3절).
+ * userId는 GPT가 정하지 않고 agent가 로그인 토큰에서 꺼낸 값으로 덮어써서 넣는다(약속 문서 3절).
  */
 @Component
 public class ClosetTools {

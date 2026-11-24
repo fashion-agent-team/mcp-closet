@@ -1,5 +1,7 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.garment;
 
+import com.fashionagent.closet.ClosetException;
+import com.fashionagent.closet.image.ImageLabels;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;

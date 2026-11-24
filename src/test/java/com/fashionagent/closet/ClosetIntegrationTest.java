@@ -1,5 +1,6 @@
 package com.fashionagent.closet;
 
+import com.fashionagent.closet.garment.Garment;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.modelcontextprotocol.client.McpClient;

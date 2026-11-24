@@ -1,5 +1,10 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.garment;
 
+import com.fashionagent.closet.ClosetException;
+import com.fashionagent.closet.ClosetProperties;
+import com.fashionagent.closet.embedding.Vectors;
+import com.fashionagent.closet.image.ImageLabels;
+import com.fashionagent.closet.image.ImageMatcher;
 import com.fashionagent.closet.embedding.E5;
 import com.fashionagent.closet.embedding.ImageTextModel;
 import com.fashionagent.closet.style.StyleKnowledge;

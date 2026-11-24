@@ -1,5 +1,6 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.garment;
 
+import com.fashionagent.closet.embedding.Vectors;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Collection;

@@ -1,4 +1,4 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.garment;
 
 /** 임베딩할 문장에 쓰는 한국어 이름. 옷 설명과 상황 문장이 같은 말로 만나야 검색이 잘 된다. */
 final class Labels {

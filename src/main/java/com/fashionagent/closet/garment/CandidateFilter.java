@@ -1,4 +1,4 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.garment;
 
 import java.util.Map;
 import java.util.Set;

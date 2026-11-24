@@ -1,5 +1,7 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.image;
 
+import com.fashionagent.closet.ClosetProperties;
+import com.fashionagent.closet.embedding.Vectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

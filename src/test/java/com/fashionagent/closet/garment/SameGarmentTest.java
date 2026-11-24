@@ -1,4 +1,4 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.garment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

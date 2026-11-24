@@ -1,5 +1,6 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.image;
 
+import com.fashionagent.closet.embedding.Vectors;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;

@@ -1,7 +1,7 @@
 package com.fashionagent.closet.style;
 
 import com.fashionagent.closet.ClosetProperties;
-import com.fashionagent.closet.Vectors;
+import com.fashionagent.closet.embedding.Vectors;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;

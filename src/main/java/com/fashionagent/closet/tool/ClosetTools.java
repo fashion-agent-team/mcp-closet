@@ -1,5 +1,9 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.tool;
 
+import com.fashionagent.closet.ClosetException;
+import com.fashionagent.closet.garment.ClosetService;
+import com.fashionagent.closet.garment.Garment;
+import com.fashionagent.closet.garment.Ids;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;

@@ -1,5 +1,7 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.image;
 
+import com.fashionagent.closet.ClosetProperties;
+import com.fashionagent.closet.embedding.Vectors;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -60,7 +62,7 @@ public class ImageMatcher {
     }
 
     /** 두 옷을 합칠 때 사진 평균끼리 사진 수로 가중 평균. */
-    static float[] combine(float[] a, int ca, float[] b, int cb, int maxCount) {
+    public static float[] combine(float[] a, int ca, float[] b, int cb, int maxCount) {
         float[] out = new float[a.length];
         double wa = Math.max(1, ca), wb = Math.max(1, cb);
         for (int i = 0; i < a.length; i++) {
@@ -114,7 +116,7 @@ public class ImageMatcher {
     }
 
     /** 평균 갱신: (old·n + v) / (n+1). n은 maxCount에서 멈춘다. */
-    static float[] mean(float[] old, int count, float[] v, int maxCount) {
+    public static float[] mean(float[] old, int count, float[] v, int maxCount) {
         if (old == null || count <= 0) {
             return v.clone();
         }

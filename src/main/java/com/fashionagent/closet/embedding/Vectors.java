@@ -1,4 +1,4 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.embedding;
 
 /** pgvector 글자 표기 '[0.1,0.2,…]'. JDBC로 넘긴 뒤 SQL에서 CAST(:q AS public.vector). */
 public final class Vectors {

@@ -1,5 +1,8 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.tool;
 
+import com.fashionagent.closet.ClosetException;
+import com.fashionagent.closet.garment.ClosetService;
+import com.fashionagent.closet.garment.Garment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;

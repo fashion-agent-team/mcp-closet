@@ -1,5 +1,6 @@
 package com.fashionagent.closet;
 
+import com.fashionagent.closet.tool.ClosetTools;
 import java.time.Clock;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;

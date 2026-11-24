@@ -1,5 +1,6 @@
-package com.fashionagent.closet;
+package com.fashionagent.closet.garment;
 
+import com.fashionagent.closet.ClosetException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

@@ -1,5 +1,6 @@
 package com.fashionagent.closet;
 
+import com.fashionagent.closet.garment.ClosetService;
 import com.fashionagent.closet.garment.Garment;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -89,6 +90,41 @@ class ClosetIntegrationTest {
             String formality) {
         return new Garment(id, category, name, colorName, family, tone, null, null, null, formality, null, null, "center",
                 0.9, null, null, null, null, null, null);
+    }
+
+    @Autowired
+    ClosetService closet;
+
+    @Test
+    @DisplayName("같은 사람이 같은 옷을 동시에 여러 번 저장해도 한 벌만 생긴다(사용자별 잠금)")
+    void concurrentSameGarmentSavedOnce() throws Exception {
+        // given: 같은 사용자, 같은 옷 8번을 동시에
+        UUID me = UUID.fromString(user);
+        int n = 8;
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(n);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var futures = new ArrayList<java.util.concurrent.Future<?>>();
+        try {
+            for (int i = 0; i < n; i++) {
+                String inputId = "c" + i;
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return closet.save(me, List.of(seen(inputId, "top", "셔츠", "흰색", "white", "light", "smart")));
+                }));
+            }
+
+            // when
+            start.countDown();
+            for (var f : futures) {
+                f.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // then
+        assertThat(jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = ?::uuid").param(user).query(Long.class).single())
+                .isEqualTo(1);
     }
 
     JsonNode callArgs(String tool, Object args) {

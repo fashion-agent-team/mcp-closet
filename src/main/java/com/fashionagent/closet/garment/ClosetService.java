@@ -540,6 +540,8 @@ public class ClosetService {
         if (from.equals(into)) {
             throw ClosetException.badRequest("같은 옷끼리는 합칠 수 없어요.");
         }
+        // closet_save와 같은 잠금: 저장과 합치기가 같은 옷을 동시에 건드리지 않게
+        garments.lockUser(userId);
         var a = garments.mergeRow(userId, from);
         var b = garments.mergeRow(userId, into);
         if (a.isEmpty() || b.isEmpty()) {

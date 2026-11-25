@@ -8,6 +8,9 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fashion}
     username: ${SPRING_DATASOURCE_USERNAME:fashion}
     password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      # DB가 죽었을 때 기본값(30초) 동안 매달리지 않고 3초 만에 실패하게(2026-11-25 게이트웨이 부하 테스트에서 발견).
+      connection-timeout: 3000 # 밀리초
   flyway:
     # 공용 DB라서 Flyway 기록 표도 closet 스키마 안에 둔다(다른 서비스와 안 겹치게).
     schemas: closet

@@ -60,6 +60,21 @@ class GarmentRepository {
                 .update();
     }
 
+    /**
+     * 이 사용자의 옷장 저장을 한 줄로 세운다(트랜잭션이 끝나면 저절로 풀림).
+     * closet_save는 "같은 옷 찾기 → 없으면 INSERT"라 같은 사람이 같은 옷을 거의 동시에 두 번 저장하면
+     * READ COMMITTED에서 둘 다 "없음"을 보고 두 벌이 생길 수 있다. 같은 옷 판단이 벡터 유사도라 유니크 제약으로는 못 막는다.
+     * 다른 사용자끼리는 키가 달라 서로 기다리지 않는다(드물게 hashtext가 겹치면 잠깐 기다릴 뿐 결과는 같다).
+     */
+    void lockUser(UUID userId) {
+        jdbc.sql("SELECT pg_advisory_xact_lock(:ns, hashtext(CAST(:userId AS text)))")
+                .param("ns", SAVE_LOCK_NAMESPACE).param("userId", userId)
+                .query((rs, i) -> 0).list();
+    }
+
+    /** pg_advisory_xact_lock(int, int)의 첫 번째 키. 다른 잠금과 섞이지 않게 옷장 저장 전용 값. */
+    static final int SAVE_LOCK_NAMESPACE = 0x434C5356; // "CLSV"
+
     int countByUser(UUID userId) {
         return jdbc.sql("SELECT count(*) FROM closet.garments WHERE user_id = :userId").param("userId", userId)
                 .query(Integer.class).single();

@@ -118,6 +118,8 @@ public class ClosetService {
         }
         List<float[]> vectors = embedAll(normalized.stream().map(Labels::passage).toList());
 
+        // 임베딩 계산이 끝난 뒤, 첫 조회 전에 잠근다(같은 사람의 동시 저장이 둘 다 "없음"을 보고 두 벌을 만들지 않게).
+        garments.lockUser(userId);
         OffsetDateTime now = OffsetDateTime.now(clock);
         int size = garments.countByUser(userId);
         var forceNew = forceNewIds == null ? java.util.Set.<String>of()

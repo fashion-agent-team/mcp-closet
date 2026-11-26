@@ -449,11 +449,11 @@ class ClosetIntegrationTest {
                 .isEqualTo(2);
         assertThat(jdbc.sql("SELECT count(*) FROM closet.wears WHERE garment_id = :id").param("id", coat).query(Integer.class).single())
                 .isEqualTo(2);
-        assertThat(jdbc.sql("SELECT color_name FROM closet.garments WHERE id = :id").param("id", coat).query(String.class).single())
-                .isEqualTo("차콜");
+        assertThat(jdbc.sql("SELECT color_name || '/' || color_family FROM closet.garments WHERE id = :id").param("id", coat)
+                .query(String.class).single()).isEqualTo("차콜/gray");
 
-        // 사진 벡터가 없으면(인식 실패) 글로 가장 가까운 같은 종류·색 옷을 maybeSameAs로 준다(작은 사진이 있을 때)
-        var noVec = garment("g1", "outer", "점퍼", "검정", "black", "dark", "casual", "나일론");
+        // 사진 벡터가 없으면(인식 실패) 글로 가장 가까운 같은 종류·색 옷을 maybeSameAs로 준다(작은 사진이 있을 때). 합친 코트는 이제 차콜(gray)
+        var noVec = garment("g1", "outer", "점퍼", "차콜", "gray", "dark", "casual", "나일론");
         noVec.put("thumbnail", jpeg);
         JsonNode r3 = call("closet_save", Map.of("userId", user, "garments", List.of(noVec)));
         assertThat(r3.get("saved").get(0).get("isNew").asBoolean()).isTrue();

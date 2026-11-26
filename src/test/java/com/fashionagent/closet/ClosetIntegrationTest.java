@@ -467,6 +467,28 @@ class ClosetIntegrationTest {
     }
 
     @Test
+    @DisplayName("closet_merge: 색 계열이 다른 두 옷을 합치면 색 이름과 색 계열을 함께 더 최근에 본 쪽으로 맞춘다")
+    void mergeKeepsColorNameAndFamilyTogether() {
+        String navy = saveOne("top", "니트", "남색", "navy", "dark", "casual");
+        String black = saveOne("top", "니트", "검정", "black", "dark", "casual");
+        // 남색은 하루 전에 본 옷(시계가 고정이라 직접 당김)
+        jdbc.sql("UPDATE closet.garments SET first_seen_at = first_seen_at - interval '1 day', last_seen_at = last_seen_at - interval '1 day' WHERE id = :id")
+                .param("id", navy).update();
+
+        call("closet_merge", Map.of("userId", user, "garmentId", black, "intoGarmentId", navy));
+        assertThat(jdbc.sql("SELECT color_name || '/' || color_family FROM closet.garments WHERE id = :id").param("id", navy)
+                .query(String.class).single()).isEqualTo("검정/black");
+
+        // 반대로 남는 쪽이 더 최근이면 남는 쪽 색을 그대로 둔다
+        String white = saveOne("top", "니트", "흰색", "white", "light", "casual");
+        jdbc.sql("UPDATE closet.garments SET first_seen_at = first_seen_at - interval '2 day', last_seen_at = last_seen_at - interval '2 day' WHERE id = :id")
+                .param("id", white).update();
+        call("closet_merge", Map.of("userId", user, "garmentId", white, "intoGarmentId", navy));
+        assertThat(jdbc.sql("SELECT color_name || '/' || color_family || '/' || tone FROM closet.garments WHERE id = :id").param("id", navy)
+                .query(String.class).single()).isEqualTo("검정/black/dark");
+    }
+
+    @Test
     @DisplayName("clothes_inspect 응답의 옷을 그대로 넘겨도 받는다(defects.checkedBy, box, position, confidence, embedding)")
     void acceptsClothesInspectGarment() {
         var g = new LinkedHashMap<String, Object>();

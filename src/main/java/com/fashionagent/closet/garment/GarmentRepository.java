@@ -320,8 +320,8 @@ class GarmentRepository {
     }
 
     /**
-     * from을 into에 합친다(사진 벡터는 부르는 쪽이 먼저 정함): 입은 날을 옮기고(같은 날은 하나만), 설명·글 임베딩은 더 최근에 본 쪽(같으면 from),
-     * 처음 본 날은 더 이른 쪽으로 둔 뒤 from을 지운다.
+     * from을 into에 합친다(사진 벡터는 부르는 쪽이 먼저 정함): 입은 날을 옮기고(같은 날은 하나만), 설명(색 이름·색 계열 포함)·글 임베딩은
+     * 더 최근에 본 쪽(같으면 from), 처음 본 날은 더 이른 쪽으로 둔 뒤 from을 지운다.
      */
     void mergeInto(UUID userId, String from, String into) {
         jdbc.sql("""
@@ -345,6 +345,7 @@ class GarmentRepository {
                         UPDATE closet.garments t SET
                                name = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.name ELSE t.name END,
                                color_name = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.color_name ELSE t.color_name END,
+                               color_family = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.color_family ELSE t.color_family END,
                                tone = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.tone ELSE t.tone END,
                                formality = CASE WHEN f.last_seen_at >= t.last_seen_at AND f.formality <> 'unknown' THEN f.formality ELSE t.formality END,
                                pattern = CASE WHEN f.last_seen_at >= t.last_seen_at THEN f.pattern ELSE t.pattern END,

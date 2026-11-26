@@ -4,11 +4,15 @@ import com.fashionagent.closet.ClosetProperties;
 import com.fashionagent.closet.embedding.Vectors;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -21,7 +25,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
- * 코디 지식(RAG 문서). 뜰 때 classpath:style_docs/*.md를 closet.style_docs에 맞춰 넣고(바뀐 조각이나 모델이 바뀐 조각만 다시 임베딩),
+ * 코디 지식(RAG 문서). 뜰 때 classpath:style_docs/*.md를 closet.style_docs에 맞춰 넣고(본문·머리말·모델 중 하나라도 바뀐 조각만 다시 임베딩),
  * closet_search 때 상황 문장과 가까운 조각을 찾는다.
  */
 @Component
@@ -59,22 +63,30 @@ public class StyleKnowledge implements ApplicationRunner {
         return docs;
     }
 
-    /** 문서와 DB를 맞춘다: 새 조각·바뀐 조각은 넣고(같은 id면 덮어씀), 없어진 조각은 지운다. */
-    void sync(List<StyleDoc> docs) {
+    /**
+     * 문서와 DB를 맞춘다: 새 조각·바뀐 조각은 넣고(같은 id면 덮어씀), 없어진 조각은 지운다. 다시 넣은 조각 수를 돌려준다.
+     * 머리말(occasion, minTemp·maxTemp 등)만 바뀌어도 metadata가 옛 값으로 남지 않게 머리말 해시(metaHash)도 비교한다.
+     */
+    int sync(List<StyleDoc> docs) {
         Map<String, String> existing = new HashMap<>();
-        jdbc.sql("SELECT id::text AS id, content, metadata::jsonb ->> 'embeddingModel' AS model FROM closet.style_docs")
-                .query((rs, i) -> Map.entry(rs.getString("id"), rs.getString("model") + "\n" + rs.getString("content")))
+        jdbc.sql("""
+                        SELECT id::text AS id, content, metadata::jsonb ->> 'embeddingModel' AS model,
+                               metadata::jsonb ->> 'metaHash' AS meta_hash FROM closet.style_docs""")
+                .query((rs, i) -> Map.entry(rs.getString("id"),
+                        rs.getString("model") + "\n" + rs.getString("meta_hash") + "\n" + rs.getString("content")))
                 .list().forEach(e -> existing.put(e.getKey(), e.getValue()));
 
         var changed = new ArrayList<Document>();
         var keep = new java.util.HashSet<String>();
         for (StyleDoc d : docs) {
+            String metaHash = metaHash(d.meta());
             for (int i = 0; i < d.chunks().size(); i++) {
                 String id = StyleDoc.chunkId(d.source(), i);
                 keep.add(id);
                 String content = d.chunks().get(i);
-                if (!(modelTag + "\n" + content).equals(existing.get(id))) {
+                if (!(modelTag + "\n" + metaHash + "\n" + content).equals(existing.get(id))) {
                     var meta = new LinkedHashMap<String, Object>(d.meta());
+                    meta.put("metaHash", metaHash);
                     meta.put("source", d.source());
                     meta.put("chunkNo", i);
                     meta.put("embeddingModel", modelTag);
@@ -91,6 +103,18 @@ public class StyleKnowledge implements ApplicationRunner {
         }
         log.info("코디 지식: 문서 {}개, 조각 {}개 (새로·다시 넣음 {}, 지움 {})",
                 docs.size(), keep.size(), changed.size(), stale.size());
+        return changed.size();
+    }
+
+    /** 머리말을 키 순서로 줄 세운 글의 SHA-256 앞 16글자. */
+    static String metaHash(Map<String, Object> meta) {
+        try {
+            byte[] h = MessageDigest.getInstance("SHA-256")
+                    .digest(new TreeMap<>(meta).toString().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(h).substring(0, 16);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /**
